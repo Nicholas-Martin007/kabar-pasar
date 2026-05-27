@@ -2,7 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { FC } from '@/constants/financial-colors';
+import {
+  Border,
+  Colors,
+  FontSize,
+  FontWeight,
+  IconSize,
+  Layout,
+  LetterSpacing,
+  Radius,
+  withAlpha13,
+} from '@/src/theme';
 import { FeedFilter } from '@/types/news';
 
 interface MarketSnapshot {
@@ -20,14 +30,14 @@ interface Props {
 }
 
 const FILTERS: { key: FeedFilter; label: string }[] = [
-  { key: 'all', label: 'Semua' },
+  { key: 'all',       label: 'Semua' },
   { key: 'watchlist', label: 'Watchlist' },
-  { key: 'idx', label: 'IDX/BEI' },
-  { key: 'macro', label: 'Makro' },
-  { key: 'global', label: 'Global' },
+  { key: 'idx',       label: 'IDX/BEI' },
+  { key: 'macro',     label: 'Makro' },
+  { key: 'global',    label: 'Global' },
 ];
 
-const DAYS_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const DAYS_ID   = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const MONTHS_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
@@ -49,21 +59,38 @@ export function FeedHeader({ activeFilter, onFilterChange, onNotification, marke
           <Text style={styles.dateText}>{formatDateID()}</Text>
         </View>
         <TouchableOpacity onPress={onNotification} style={styles.notifButton}>
-          <Ionicons name="notifications-outline" size={22} color={FC.textSecondary} />
+          <Ionicons name="notifications-outline" size={IconSize.md} color={Colors.text.secondary} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.marketBar}>
         <View style={styles.marketLeft}>
-          <Text style={styles.marketLabel}>IHSG</Text>
-          <Text style={styles.marketValue}>{market.value.toLocaleString('id-ID', { minimumFractionDigits: 2 })}</Text>
+          <Text style={styles.marketLabel}>{market.index}</Text>
+          <Text style={styles.marketValue}>
+            {market.value.toLocaleString('id-ID', { minimumFractionDigits: 2 })}
+          </Text>
         </View>
         <View style={styles.marketRight}>
-          <Text style={[styles.marketChange, { color: pricePositive ? FC.positive : FC.negative }]}>
+          <Text
+            style={[
+              styles.marketChange,
+              { color: pricePositive ? Colors.sentiment.positive : Colors.sentiment.negative },
+            ]}
+          >
             {pricePositive ? '▲' : '▼'} {Math.abs(market.change).toFixed(2)}%
           </Text>
-          <View style={[styles.statusDot, { backgroundColor: market.isOpen ? FC.positive : FC.textMuted }]} />
-          <Text style={[styles.statusText, { color: market.isOpen ? FC.positive : FC.textMuted }]}>
+          <View
+            style={[
+              styles.statusDot,
+              { backgroundColor: market.isOpen ? Colors.sentiment.positive : Colors.text.muted },
+            ]}
+          />
+          <Text
+            style={[
+              styles.statusText,
+              { color: market.isOpen ? Colors.sentiment.positive : Colors.text.muted },
+            ]}
+          >
             {market.isOpen ? 'BUKA' : 'TUTUP'}
           </Text>
         </View>
@@ -82,7 +109,9 @@ export function FeedHeader({ activeFilter, onFilterChange, onNotification, marke
               onPress={() => onFilterChange(f.key)}
               style={[styles.filterChip, active && styles.filterChipActive]}
             >
-              <Text style={[styles.filterText, active && styles.filterTextActive]}>{f.label}</Text>
+              <Text style={[styles.filterText, active && styles.filterTextActive]}>
+                {f.label}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -93,68 +122,68 @@ export function FeedHeader({ activeFilter, onFilterChange, onNotification, marke
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: FC.background,
-    paddingTop: 16,
-    paddingBottom: 8,
-    gap: 14,
+    backgroundColor: Colors.background.screen,
+    paddingTop: Layout.screenPaddingX,
+    paddingBottom: Layout.contentGap,
+    gap: Layout.sectionGap,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingHorizontal: 16,
+    paddingHorizontal: Layout.screenPaddingX,
   },
   appName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: FC.textPrimary,
-    letterSpacing: -0.3,
+    fontSize: FontSize.title,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.text.primary,
+    letterSpacing: LetterSpacing.tight,
   },
   dateText: {
-    fontSize: 12,
-    color: FC.textMuted,
+    fontSize: FontSize.body,
+    color: Colors.text.muted,
     marginTop: 2,
   },
   notifButton: {
-    padding: 4,
+    padding: Layout.badgePaddingY,
   },
   marketBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginHorizontal: 16,
-    backgroundColor: FC.surface,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: FC.border,
+    marginHorizontal: Layout.screenPaddingX,
+    backgroundColor: Colors.background.surface,
+    borderRadius: Radius.component,
+    paddingHorizontal: Layout.componentPaddingX,
+    paddingVertical: Layout.componentPaddingY,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
   },
   marketLeft: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 8,
+    gap: Layout.contentGap,
   },
   marketLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: FC.accent,
-    letterSpacing: 0.5,
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+    color: Colors.brand.accent,
+    letterSpacing: LetterSpacing.wider,
   },
   marketValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: FC.textPrimary,
-    letterSpacing: -0.3,
+    fontSize: FontSize.subhead,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+    letterSpacing: LetterSpacing.tight,
   },
   marketRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Layout.contentGap,
   },
   marketChange: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
   },
   statusDot: {
     width: 6,
@@ -162,33 +191,33 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.wider,
   },
   filtersContent: {
-    paddingHorizontal: 16,
-    gap: 8,
+    paddingHorizontal: Layout.screenPaddingX,
+    gap: Layout.contentGap,
   },
   filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: FC.surface,
-    borderWidth: 1,
-    borderColor: FC.border,
+    paddingHorizontal: Layout.filterChipPaddingX,
+    paddingVertical: Layout.filterChipPaddingY,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.background.surface,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
   },
   filterChipActive: {
-    backgroundColor: FC.accent + '22',
-    borderColor: FC.accent,
+    backgroundColor: withAlpha13(Colors.brand.accent),
+    borderColor: Colors.brand.accent,
   },
   filterText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: FC.textSecondary,
+    fontSize: FontSize.filter,
+    fontWeight: FontWeight.medium,
+    color: Colors.text.secondary,
   },
   filterTextActive: {
-    color: FC.accent,
-    fontWeight: '700',
+    color: Colors.brand.accent,
+    fontWeight: FontWeight.bold,
   },
 });

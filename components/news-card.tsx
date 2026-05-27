@@ -2,8 +2,19 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { FC } from '@/constants/financial-colors';
-import { Fonts } from '@/constants/theme';
+import {
+  Border,
+  Colors,
+  FontFamily,
+  FontSize,
+  FontWeight,
+  IconSize,
+  Layout,
+  LineHeight,
+  LetterSpacing,
+  Radius,
+  withAlpha13,
+} from '@/src/theme';
 import { NewsItem, NewsSource } from '@/types/news';
 import { timeAgo } from '@/utils/time';
 
@@ -14,27 +25,27 @@ interface Props {
 }
 
 const IMPORTANCE_COLOR: Record<NewsItem['importance'], string> = {
-  critical: FC.importanceCritical,
-  high: FC.importanceHigh,
-  medium: FC.importanceMedium,
-  low: FC.importanceLow,
+  critical: Colors.importance.critical,
+  high:     Colors.importance.high,
+  medium:   Colors.importance.medium,
+  low:      Colors.importance.low,
 };
 
 const IMPORTANCE_LABEL: Record<NewsItem['importance'], string> = {
   critical: 'KRITIS',
-  high: 'PENTING',
-  medium: 'INFO',
-  low: 'UMUM',
+  high:     'PENTING',
+  medium:   'INFO',
+  low:      'UMUM',
 };
 
 const SOURCE_COLOR: Record<NewsSource, string> = {
-  IDX: FC.tagIDX,
-  'CNBC Indonesia': FC.tagCNBCID,
-  Kontan: FC.tagKontan,
-  'Bisnis Indonesia': FC.tagBisnis,
-  'Detik Finance': FC.tagDetik,
-  Reuters: FC.tagReuters,
-  'CNBC Global': FC.tagCNBCGlobal,
+  IDX:                Colors.source.IDX,
+  'CNBC Indonesia':   Colors.source['CNBC Indonesia'],
+  Kontan:             Colors.source.Kontan,
+  'Bisnis Indonesia': Colors.source['Bisnis Indonesia'],
+  'Detik Finance':    Colors.source['Detik Finance'],
+  Reuters:            Colors.source.Reuters,
+  'CNBC Global':      Colors.source['CNBC Global'],
 };
 
 export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
@@ -42,7 +53,7 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
   const sourceColor = SOURCE_COLOR[item.source];
   const pricePositive = (item.priceChange ?? 0) >= 0;
 
-  const handlePress = useCallback(() => onPress(item.id), [item.id, onPress]);
+  const handlePress    = useCallback(() => onPress(item.id),    [item.id, onPress]);
   const handleBookmark = useCallback(() => onBookmark(item.id), [item.id, onBookmark]);
 
   return (
@@ -55,12 +66,12 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
 
       <View style={styles.content}>
         <View style={styles.metaRow}>
-          <View style={[styles.sourceChip, { backgroundColor: sourceColor + '22' }]}>
+          <View style={[styles.sourceChip, { backgroundColor: withAlpha13(sourceColor) }]}>
             <Text style={[styles.sourceText, { color: sourceColor }]}>{item.source}</Text>
           </View>
 
           {item.importance !== 'low' && (
-            <View style={[styles.importancePill, { backgroundColor: stripeColor + '22' }]}>
+            <View style={[styles.importancePill, { backgroundColor: withAlpha13(stripeColor) }]}>
               <Text style={[styles.importanceText, { color: stripeColor }]}>
                 {IMPORTANCE_LABEL[item.importance]}
               </Text>
@@ -87,7 +98,12 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
               <View style={styles.tickerChip}>
                 <Text style={styles.tickerText}>{item.ticker}</Text>
               </View>
-              <Text style={[styles.priceChange, { color: pricePositive ? FC.positive : FC.negative }]}>
+              <Text
+                style={[
+                  styles.priceChange,
+                  { color: pricePositive ? Colors.sentiment.positive : Colors.sentiment.negative },
+                ]}
+              >
                 {pricePositive ? '▲' : '▼'} {Math.abs(item.priceChange!).toFixed(2)}%
               </Text>
             </View>
@@ -95,11 +111,14 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
             <View />
           )}
 
-          <TouchableOpacity onPress={handleBookmark} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={handleBookmark}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Ionicons
               name={item.isBookmarked ? 'bookmark' : 'bookmark-outline'}
-              size={18}
-              color={item.isBookmarked ? FC.accent : FC.textMuted}
+              size={IconSize.sm}
+              color={item.isBookmarked ? Colors.brand.accent : Colors.text.muted}
             />
           </TouchableOpacity>
         </View>
@@ -113,88 +132,88 @@ NewsCard.displayName = 'NewsCard';
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    backgroundColor: FC.surface,
-    borderRadius: 12,
+    backgroundColor: Colors.background.surface,
+    borderRadius: Radius.card,
     overflow: 'hidden',
-    marginHorizontal: 16,
-    marginVertical: 5,
-    borderWidth: 1,
-    borderColor: FC.border,
+    marginHorizontal: Layout.screenPaddingX,
+    marginVertical: Layout.cardMarginV,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
   },
   cardUnread: {
-    backgroundColor: FC.surfaceElevated,
+    backgroundColor: Colors.background.surfaceElevated,
   },
   stripe: {
-    width: 3,
+    width: Border.stripeWidth,
     flexShrink: 0,
   },
   content: {
     flex: 1,
-    padding: 14,
-    gap: 8,
+    padding: Layout.cardPadding,
+    gap: Layout.contentGap,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Layout.rowGap,
     flexWrap: 'wrap',
   },
   sourceChip: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: Layout.chipPaddingX,
+    paddingVertical: Layout.chipPaddingY,
+    borderRadius: Radius.chip,
   },
   sourceText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.wide,
   },
   importancePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: Layout.chipPaddingX,
+    paddingVertical: Layout.chipPaddingY,
+    borderRadius: Radius.chip,
   },
   importanceText: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontSize: FontSize.badge,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.wider,
   },
   timeText: {
-    fontSize: 11,
-    color: FC.textMuted,
+    fontSize: FontSize.small,
+    color: Colors.text.muted,
     marginLeft: 'auto',
   },
   title: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: FC.textPrimary,
-    lineHeight: 20,
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+    color: Colors.text.primary,
+    lineHeight: LineHeight.normal,
   },
   titleRead: {
-    color: FC.textSecondary,
-    fontWeight: '500',
+    color: Colors.text.secondary,
+    fontWeight: FontWeight.medium,
   },
   summaryRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: Layout.rowGap,
     alignItems: 'flex-start',
   },
   aiLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: FC.accent,
-    backgroundColor: FC.accent + '22',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 3,
+    fontSize: FontSize.badge,
+    fontWeight: FontWeight.bold,
+    color: Colors.brand.accent,
+    backgroundColor: withAlpha13(Colors.brand.accent),
+    paddingHorizontal: Layout.badgePaddingX,
+    paddingVertical: Layout.badgePaddingY,
+    borderRadius: Radius.badge,
     marginTop: 1,
     overflow: 'hidden',
   },
   summary: {
     flex: 1,
-    fontSize: 12,
-    color: FC.textSecondary,
-    lineHeight: 17,
+    fontSize: FontSize.body,
+    color: Colors.text.secondary,
+    lineHeight: LineHeight.tight,
   },
   bottomRow: {
     flexDirection: 'row',
@@ -205,23 +224,23 @@ const styles = StyleSheet.create({
   tickerGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Layout.rowGap,
   },
   tickerChip: {
-    backgroundColor: FC.border,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 4,
+    backgroundColor: Colors.border.default,
+    paddingHorizontal: Layout.chipPaddingX,
+    paddingVertical: Layout.chipPaddingY + 1,
+    borderRadius: Radius.chip,
   },
   tickerText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: FC.textPrimary,
-    fontFamily: Fonts?.ios?.mono ?? 'monospace',
+    fontSize: FontSize.small,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+    fontFamily: FontFamily.mono ?? undefined,
   },
   priceChange: {
-    fontSize: 12,
-    fontWeight: '600',
-    fontFamily: Fonts?.ios?.mono ?? 'monospace',
+    fontSize: FontSize.body,
+    fontWeight: FontWeight.semibold,
+    fontFamily: FontFamily.mono ?? undefined,
   },
 });

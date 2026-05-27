@@ -4,27 +4,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
-import { FC } from '@/constants/financial-colors';
+import { Colors, FontSize, Layout } from '@/src/theme';
 import { MOCK_NEWS } from '@/data/mock-news';
 import { FeedFilter, NewsItem } from '@/types/news';
 
 const MARKET = {
-  index: 'IHSG',
-  value: 7_234.12,
+  index:  'IHSG',
+  value:  7_234.12,
   change: 0.82,
   isOpen: true,
 };
 
 const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsItem['category'][]> = {
-  all: ['announcement', 'market', 'macro', 'sector', 'global'],
+  all:       ['announcement', 'market', 'macro', 'sector', 'global'],
   watchlist: ['announcement'],
-  idx: ['announcement', 'market'],
-  macro: ['macro'],
-  global: ['global'],
+  idx:       ['announcement', 'market'],
+  macro:     ['macro'],
+  global:    ['global'],
 };
 
 export default function FeedScreen() {
-  const [news, setNews] = useState<NewsItem[]>(MOCK_NEWS);
+  const [news, setNews]               = useState<NewsItem[]>(MOCK_NEWS);
   const [activeFilter, setActiveFilter] = useState<FeedFilter>('all');
 
   const filtered = news.filter((item) =>
@@ -89,20 +89,20 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: FC.background,
+    backgroundColor: Colors.background.screen,
   },
   listContent: {
-    paddingBottom: 32,
+    paddingBottom: Layout.listPaddingBottom,
   },
   separator: {
     height: 0,
   },
   emptyState: {
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: Layout.emptyPaddingTop,
   },
   emptyText: {
-    color: FC.textMuted,
-    fontSize: 14,
+    color: Colors.text.muted,
+    fontSize: FontSize.base,
   },
 });
