@@ -4,12 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Colors, FontSize, FontWeight } from '@/src/theme';
 
-export default function HomeScreen() {
+export default function WatchlistScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.center}>
-        <Ionicons name="home-outline" size={48} color={Colors.text.muted} />
-        <Text style={styles.title}>Home</Text>
+        <Ionicons name="star-outline" size={48} color={Colors.text.muted} />
+        <Text style={styles.title}>Watchlist</Text>
         <Text style={styles.subtitle}>Segera hadir</Text>
       </View>
     </SafeAreaView>

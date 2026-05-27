@@ -27,18 +27,52 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Feed',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={IconSize.lg} name="newspaper.fill" color={color} />
+          title: 'Home',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={IconSize.lg}
+              name={focused ? 'house.fill' : 'house'}
+              color={color}
+            />
           ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="berita"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={IconSize.lg} name="magnifyingglass" color={color} />
+          title: 'Berita',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={IconSize.lg}
+              name={focused ? 'newspaper.fill' : 'newspaper'}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="watchlist"
+        options={{
+          title: 'Watchlist',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={IconSize.lg}
+              name={focused ? 'star.fill' : 'star'}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profil',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={IconSize.lg}
+              name={focused ? 'person.fill' : 'person'}
+              color={color}
+            />
           ),
         }}
       />
