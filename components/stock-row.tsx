@@ -8,12 +8,15 @@ import {
   FontWeight,
   Layout,
   Radius,
+  withAlpha13,
 } from '@/src/theme';
 import { Stock } from '@/src/types/stock';
 
 interface Props {
   stock: Stock;
   onPress?: (ticker: string) => void;
+  onLongPress?: (ticker: string) => void;
+  newsBadge?: number;
 }
 
 const SPARKLINE_H = 28;
@@ -45,19 +48,28 @@ function SparklineBars({ data, positive }: { data: number[]; positive: boolean }
   );
 }
 
-export const StockRow = React.memo(({ stock, onPress }: Props) => {
-  const positive   = stock.changePercent >= 0;
+export const StockRow = React.memo(({ stock, onPress, onLongPress, newsBadge }: Props) => {
+  const positive    = stock.changePercent >= 0;
   const changeColor = positive ? Colors.sentiment.positive : Colors.sentiment.negative;
 
   return (
     <TouchableOpacity
       activeOpacity={0.7}
       onPress={() => onPress?.(stock.ticker)}
+      onLongPress={() => onLongPress?.(stock.ticker)}
+      delayLongPress={500}
       style={styles.row}
     >
       <View style={styles.left}>
-        <View style={styles.tickerChip}>
-          <Text style={styles.tickerText}>{stock.ticker}</Text>
+        <View style={styles.tickerRow}>
+          <View style={styles.tickerChip}>
+            <Text style={styles.tickerText}>{stock.ticker}</Text>
+          </View>
+          {!!newsBadge && newsBadge > 0 && (
+            <View style={styles.newsBadge}>
+              <Text style={styles.newsBadgeText}>{newsBadge}</Text>
+            </View>
+          )}
         </View>
         <Text style={styles.nameText} numberOfLines={1}>{stock.name}</Text>
       </View>
@@ -89,6 +101,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 3,
   },
+  tickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   tickerChip: {
     backgroundColor: Colors.border.default,
     paddingHorizontal: Layout.chipPaddingX,
@@ -101,6 +118,17 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.text.primary,
     fontFamily: FontFamily.mono ?? undefined,
+  },
+  newsBadge: {
+    backgroundColor: withAlpha13(Colors.brand.accent),
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: Radius.badge,
+  },
+  newsBadgeText: {
+    fontSize: FontSize.badge,
+    fontWeight: FontWeight.bold,
+    color: Colors.brand.accent,
   },
   nameText: {
     fontSize: FontSize.body,
