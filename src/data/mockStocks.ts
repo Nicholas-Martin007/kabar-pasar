@@ -1,0 +1,118 @@
+import { Stock } from '@/src/types/stock';
+
+export const mockStocks: Stock[] = [
+  {
+    ticker: 'BBCA',
+    name: 'Bank Central Asia',
+    sector: 'Perbankan',
+    price: 9_200,
+    change: 125,
+    changePercent: 1.38,
+    // 7-day sparkline showing steady uptrend with mild intraday variation
+    sparkline: [8_950, 8_875, 8_925, 9_050, 8_975, 9_075, 9_200],
+  },
+  {
+    ticker: 'BBRI',
+    name: 'Bank Rakyat Indonesia',
+    sector: 'Perbankan',
+    price: 5_350,
+    change: 100,
+    changePercent: 1.91,
+    sparkline: [5_175, 5_125, 5_200, 5_150, 5_250, 5_300, 5_350],
+  },
+  {
+    ticker: 'BMRI',
+    name: 'Bank Mandiri',
+    sector: 'Perbankan',
+    price: 7_750,
+    change: -150,
+    changePercent: -1.90,
+    // Downtrend with brief bounce
+    sparkline: [7_950, 7_900, 7_875, 7_825, 7_800, 7_775, 7_750],
+  },
+  {
+    ticker: 'TLKM',
+    name: 'Telkom Indonesia',
+    sector: 'Telekomunikasi',
+    price: 3_150,
+    change: 50,
+    changePercent: 1.61,
+    sparkline: [3_050, 3_025, 3_075, 3_025, 3_100, 3_125, 3_150],
+  },
+  {
+    ticker: 'ASII',
+    name: 'Astra International',
+    sector: 'Industri & Otomotif',
+    price: 5_650,
+    change: -75,
+    changePercent: -1.31,
+    sparkline: [5_775, 5_750, 5_700, 5_725, 5_650, 5_675, 5_650],
+  },
+  {
+    ticker: 'GOTO',
+    name: 'GoTo Gojek Tokopedia',
+    sector: 'Teknologi',
+    price: 72,
+    change: 4,
+    changePercent: 5.88,
+    // Volatile but trending up
+    sparkline: [62, 65, 63, 67, 69, 71, 72],
+  },
+  {
+    ticker: 'BREN',
+    name: 'Barito Renewables Energy',
+    sector: 'Energi Terbarukan',
+    price: 4_125,
+    change: 225,
+    changePercent: 5.77,
+    // Strong uptrend
+    sparkline: [3_800, 3_875, 3_950, 3_925, 4_000, 4_050, 4_125],
+  },
+  {
+    ticker: 'ANTM',
+    name: 'Aneka Tambang',
+    sector: 'Pertambangan',
+    price: 1_695,
+    change: 85,
+    changePercent: 5.28,
+    sparkline: [1_575, 1_590, 1_610, 1_625, 1_640, 1_670, 1_695],
+  },
+  {
+    ticker: 'UNVR',
+    name: 'Unilever Indonesia',
+    sector: 'Barang Konsumsi',
+    price: 2_050,
+    change: -60,
+    changePercent: -2.85,
+    // Gradual downtrend
+    sparkline: [2_175, 2_150, 2_125, 2_100, 2_075, 2_075, 2_050],
+  },
+  {
+    ticker: 'MEDC',
+    name: 'Medco Energi Internasional',
+    sector: 'Energi',
+    price: 1_875,
+    change: 125,
+    changePercent: 7.14,
+    sparkline: [1_700, 1_725, 1_750, 1_775, 1_800, 1_850, 1_875],
+  },
+  {
+    ticker: 'PGAS',
+    name: 'Perusahaan Gas Negara',
+    sector: 'Utilitas',
+    price: 1_685,
+    change: -15,
+    changePercent: -0.88,
+    // Flat with slight drift down
+    sparkline: [1_720, 1_710, 1_700, 1_695, 1_690, 1_685, 1_685],
+  },
+  {
+    ticker: 'INDF',
+    name: 'Indofood Sukses Makmur',
+    sector: 'Barang Konsumsi',
+    price: 7_325,
+    change: 75,
+    changePercent: 1.03,
+    sparkline: [7_200, 7_225, 7_250, 7_225, 7_275, 7_300, 7_325],
+  },
+];
