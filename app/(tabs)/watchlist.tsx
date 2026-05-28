@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StockRow } from '@/components/stock-row';
 import { mockNews } from '@/src/data/mockNews';
 import { mockStocks } from '@/src/data/mockStocks';
-import { mockWatchlist } from '@/src/data/mockWatchlist';
+import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
   Border,
   Colors,
@@ -35,7 +35,6 @@ import {
   withAlpha13,
 } from '@/src/theme';
 import { Stock } from '@/src/types/stock';
-import { WatchlistItem } from '@/src/types/watchlist';
 
 function countRecentNews(ticker: string): number {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -186,11 +185,9 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 // ── Watchlist Screen ─────────────────────────────────────────────────────────
 
 export default function WatchlistScreen() {
-  const [items, setItems]               = useState<WatchlistItem[]>(mockWatchlist);
+  const { items, tickers: watchlistTickers, add, remove } = useWatchlist();
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing]     = useState(false);
-
-  const watchlistTickers = useMemo(() => new Set(items.map((i) => i.ticker)), [items]);
 
   const stocks = useMemo(
     () =>
@@ -227,19 +224,16 @@ export default function WatchlistScreen() {
         {
           text: 'Hapus',
           style: 'destructive',
-          onPress: () => setItems((prev) => prev.filter((i) => i.ticker !== ticker)),
+          onPress: () => remove(ticker),
         },
       ]
     );
-  }, []);
+  }, [remove]);
 
   const handleAdd = useCallback((ticker: string) => {
-    setItems((prev) => {
-      if (prev.some((i) => i.ticker === ticker)) return prev;
-      return [...prev, { ticker, addedAt: new Date().toISOString() }];
-    });
+    add(ticker);
     setModalVisible(false);
-  }, []);
+  }, [add]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>

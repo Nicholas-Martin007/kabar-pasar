@@ -15,7 +15,7 @@ import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { mockNews } from '@/src/data/mockNews';
 import { mockStocks } from '@/src/data/mockStocks';
-import { mockWatchlist } from '@/src/data/mockWatchlist';
+import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
   Border,
   Colors,
@@ -35,18 +35,11 @@ import { getGreeting, getMarketStatus } from '@/utils/market';
 const IHSG = { value: 7_234.56, changePercent: 0.42 };
 const UNREAD_COUNT = 3;
 
-// ── Derived data (computed once at module level, not on each render) ─────────
+// ── Static derived data ───────────────────────────────────────────────────────
 const topNews: News[] = mockNews
   .filter((n) => n.importance === 'high')
   .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
   .slice(0, 3);
-
-const watchlistPreview: Stock[] = mockWatchlist
-  .slice(0, 4)
-  .flatMap((w) => {
-    const s = mockStocks.find((s) => s.ticker === w.ticker);
-    return s ? [s] : [];
-  });
 
 function formatIHSG(value: number): string {
   const [int, dec] = value.toFixed(2).split('.');
@@ -56,11 +49,19 @@ function formatIHSG(value: number): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
+  const { items: watchlistItems } = useWatchlist();
   const [greeting,      setGreeting]      = useState(getGreeting);
   const [marketStatus,  setMarketStatus]  = useState(getMarketStatus);
   const [refreshing,    setRefreshing]    = useState(false);
   const [readIds,       setReadIds]       = useState(new Set<string>());
   const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
+
+  const watchlistPreview: Stock[] = watchlistItems
+    .slice(0, 4)
+    .flatMap((w) => {
+      const s = mockStocks.find((s) => s.ticker === w.ticker);
+      return s ? [s] : [];
+    });
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

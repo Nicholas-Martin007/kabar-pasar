@@ -1,0 +1,133 @@
+export interface StockStats {
+  marketCap: string;
+  volume: string;
+  dayLow: number;
+  dayHigh: number;
+  week52Low: number;
+  week52High: number;
+  per: number | null;
+  dividendYield: number | null;
+}
+
+export const mockStockStats: Record<string, StockStats> = {
+  BBCA: {
+    marketCap:    'Rp 1.131 T',
+    volume:       '18,4 juta lot',
+    dayLow:       9_075,
+    dayHigh:      9_225,
+    week52Low:    8_200,
+    week52High:   9_650,
+    per:          22.4,
+    dividendYield: 2.1,
+  },
+  BBRI: {
+    marketCap:    'Rp 806 T',
+    volume:       '31,2 juta lot',
+    dayLow:       5_275,
+    dayHigh:      5_400,
+    week52Low:    4_680,
+    week52High:   5_875,
+    per:          13.8,
+    dividendYield: 4.6,
+  },
+  BMRI: {
+    marketCap:    'Rp 718 T',
+    volume:       '22,1 juta lot',
+    dayLow:       7_700,
+    dayHigh:      7_875,
+    week52Low:    6_900,
+    week52High:   8_225,
+    per:          14.2,
+    dividendYield: 3.8,
+  },
+  TLKM: {
+    marketCap:    'Rp 312 T',
+    volume:       '45,6 juta lot',
+    dayLow:       3_100,
+    dayHigh:      3_175,
+    week52Low:    2_780,
+    week52High:   3_620,
+    per:          17.1,
+    dividendYield: 5.7,
+  },
+  ASII: {
+    marketCap:    'Rp 228 T',
+    volume:       '14,8 juta lot',
+    dayLow:       5_600,
+    dayHigh:      5_725,
+    week52Low:    4_950,
+    week52High:   6_275,
+    per:          9.6,
+    dividendYield: 3.2,
+  },
+  GOTO: {
+    marketCap:    'Rp 75 T',
+    volume:       '1.204 juta lot',
+    dayLow:       68,
+    dayHigh:      74,
+    week52Low:    50,
+    week52High:   98,
+    per:          null,
+    dividendYield: null,
+  },
+  BREN: {
+    marketCap:    'Rp 498 T',
+    volume:       '8,9 juta lot',
+    dayLow:       4_050,
+    dayHigh:      4_175,
+    week52Low:    2_980,
+    week52High:   4_800,
+    per:          38.5,
+    dividendYield: 0.4,
+  },
+  ANTM: {
+    marketCap:    'Rp 40 T',
+    volume:       '62,3 juta lot',
+    dayLow:       1_650,
+    dayHigh:      1_710,
+    week52Low:    1_275,
+    week52High:   2_060,
+    per:          11.4,
+    dividendYield: 1.8,
+  },
+  UNVR: {
+    marketCap:    'Rp 78 T',
+    volume:       '9,1 juta lot',
+    dayLow:       2_020,
+    dayHigh:      2_090,
+    week52Low:    1_850,
+    week52High:   2_750,
+    per:          18.3,
+    dividendYield: 6.2,
+  },
+  MEDC: {
+    marketCap:    'Rp 26 T',
+    volume:       '38,7 juta lot',
+    dayLow:       1_810,
+    dayHigh:      1_900,
+    week52Low:    1_280,
+    week52High:   2_050,
+    per:          7.2,
+    dividendYield: 2.4,
+  },
+  PGAS: {
+    marketCap:    'Rp 40 T',
+    volume:       '19,5 juta lot',
+    dayLow:       1_670,
+    dayHigh:      1_700,
+    week52Low:    1_420,
+    week52High:   1_880,
+    per:          8.9,
+    dividendYield: 4.1,
+  },
+  INDF: {
+    marketCap:    'Rp 64 T',
+    volume:       '7,2 juta lot',
+    dayLow:       7_275,
+    dayHigh:      7_375,
+    week52Low:    6_400,
+    week52High:   7_800,
+    per:          7.4,
+    dividendYield: 4.8,
+  },
+};
