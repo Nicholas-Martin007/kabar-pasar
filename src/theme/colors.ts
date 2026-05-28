@@ -1,7 +1,7 @@
 // Contrast ratios verified against WCAG AA (≥ 4.5:1 for normal text, ≥ 3:1 for large/UI)
-// Test background: surface #0F1521 (cards), screen #080C14 (page bg)
+// Test backgrounds: surface #0F1521 (cards), screen #080C14 (page bg)
 
-// Internal palette — import Colors below, not these
+// Internal palette — components import from Colors below, not from P
 const P = {
   // Backgrounds (dark navy)
   navy950: '#080C14', // page bg
@@ -16,22 +16,20 @@ const P = {
   slate400: '#6F80A2',
 
   // Brand / accent
-  teal400:   '#00C8A0', // 8.5:1 on navy900 ✓
+  teal400: '#00C8A0', // 8.5:1 on navy900 ✓
 
   // Sentiment
-  green500:  '#22C55E', // 8.0:1 on navy900 ✓
-  rose500:   '#F43F5E', // 5.0:1 on navy900 ✓
+  green500: '#22C55E', // 8.0:1 on navy900 ✓
+  rose500:  '#F43F5E', // 5.0:1 on navy900 ✓
 
-  // Importance
-  orange500: '#F97316', // 6.5:1 on navy900 ✓
-  blue400:   '#3B82F6', // 5.0:1 on navy900 ✓
+  // Importance (3-level)
+  // high uses rose — most urgent; critical folded in
+  blue400: '#3B82F6', // 5.0:1 on navy900 ✓ — medium importance
 
-  // Source brand tags — all corrected to ≥ 4.5:1 on navy900
-  red400:    '#FF5252', // 5.7:1 — was #E02020 (3.8:1) — CNBC ID, Detik Finance
-  sky400:    '#3B9ED6', // 6.1:1 — was #1D6FA5 (3.4:1) — Kontan
-  indigo400: '#5B8EF5', // 5.8:1 — was #2563EB (3.5:1) — Bisnis Indonesia
-  orange400: '#FF6C2F', // 6.5:1 — unchanged ✓ — Reuters
-  blue300:   '#4D94FF', // 6.1:1 — was #0070F3 (4.0:1) — CNBC Global
+  // Source brand tags — all verified ≥ 4.5:1 on navy900
+  red400:    '#FF5252', // 5.7:1 — CNBC Indonesia, Detik Finance
+  sky400:    '#3B9ED6', // 6.1:1 — Kontan
+  indigo400: '#5B8EF5', // 5.8:1 — Bisnis Indonesia
 } as const;
 
 export const Colors = {
@@ -55,20 +53,20 @@ export const Colors = {
     positive: P.green500,
     negative: P.rose500,
   },
+  // 3-level importance: critical folded into high
   importance: {
-    critical: P.rose500,
-    high:     P.orange500,
-    medium:   P.blue400,
-    low:      P.slate400,
+    high:   P.rose500,  // most urgent — red
+    medium: P.blue400,  // noteworthy — blue
+    low:    P.slate400, // general — muted
   },
+  // Sources matching NewsSource in src/types/news.ts
   source: {
-    IDX:                P.teal400,
     'CNBC Indonesia':   P.red400,
+    'Detik Finance':    P.red400,
     Kontan:             P.sky400,
     'Bisnis Indonesia': P.indigo400,
-    'Detik Finance':    P.red400,
-    Reuters:            P.orange400,
-    'CNBC Global':      P.blue300,
+    BEI:                P.teal400,   // 8.5:1 ✓
+    'IR Emiten':        P.slate300,  // 6.3:1 ✓ — neutral for corporate IR
   },
   tabBar: {
     background: P.navy950,

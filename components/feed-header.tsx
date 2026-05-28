@@ -13,7 +13,7 @@ import {
   Radius,
   withAlpha13,
 } from '@/src/theme';
-import { FeedFilter } from '@/types/news';
+import { FeedFilter } from '@/src/types/news';
 
 interface MarketSnapshot {
   index: string;

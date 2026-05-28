@@ -15,43 +15,41 @@ import {
   Radius,
   withAlpha13,
 } from '@/src/theme';
-import { NewsItem, NewsSource } from '@/types/news';
+import { News, NewsImportance, NewsSource } from '@/src/types/news';
 import { timeAgo } from '@/utils/time';
 
 interface Props {
-  item: NewsItem;
+  item: News;
+  isRead: boolean;
+  isBookmarked: boolean;
   onPress: (id: string) => void;
   onBookmark: (id: string) => void;
 }
 
-const IMPORTANCE_COLOR: Record<NewsItem['importance'], string> = {
-  critical: Colors.importance.critical,
-  high:     Colors.importance.high,
-  medium:   Colors.importance.medium,
-  low:      Colors.importance.low,
+const IMPORTANCE_COLOR: Record<NewsImportance, string> = {
+  high:   Colors.importance.high,
+  medium: Colors.importance.medium,
+  low:    Colors.importance.low,
 };
 
-const IMPORTANCE_LABEL: Record<NewsItem['importance'], string> = {
-  critical: 'KRITIS',
-  high:     'PENTING',
-  medium:   'INFO',
-  low:      'UMUM',
+const IMPORTANCE_LABEL: Record<NewsImportance, string> = {
+  high:   'PENTING',
+  medium: 'INFO',
+  low:    'UMUM',
 };
 
 const SOURCE_COLOR: Record<NewsSource, string> = {
-  IDX:                Colors.source.IDX,
   'CNBC Indonesia':   Colors.source['CNBC Indonesia'],
+  'Detik Finance':    Colors.source['Detik Finance'],
   Kontan:             Colors.source.Kontan,
   'Bisnis Indonesia': Colors.source['Bisnis Indonesia'],
-  'Detik Finance':    Colors.source['Detik Finance'],
-  Reuters:            Colors.source.Reuters,
-  'CNBC Global':      Colors.source['CNBC Global'],
+  BEI:                Colors.source.BEI,
+  'IR Emiten':        Colors.source['IR Emiten'],
 };
 
-export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
+export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark }: Props) => {
   const stripeColor = IMPORTANCE_COLOR[item.importance];
   const sourceColor = SOURCE_COLOR[item.source];
-  const pricePositive = (item.priceChange ?? 0) >= 0;
 
   const handlePress    = useCallback(() => onPress(item.id),    [item.id, onPress]);
   const handleBookmark = useCallback(() => onBookmark(item.id), [item.id, onBookmark]);
@@ -60,11 +58,13 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
     <TouchableOpacity
       activeOpacity={0.75}
       onPress={handlePress}
-      style={[styles.card, !item.isRead && styles.cardUnread]}
+      style={[styles.card, !isRead && styles.cardUnread]}
     >
+      {/* Importance stripe — color encodes urgency level */}
       <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
 
       <View style={styles.content}>
+        {/* Row 1: source + importance badge + timestamp */}
         <View style={styles.metaRow}>
           <View style={[styles.sourceChip, { backgroundColor: withAlpha13(sourceColor) }]}>
             <Text style={[styles.sourceText, { color: sourceColor }]}>{item.source}</Text>
@@ -81,31 +81,36 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
           <Text style={styles.timeText}>{timeAgo(item.publishedAt)}</Text>
         </View>
 
-        <Text style={[styles.title, item.isRead && styles.titleRead]} numberOfLines={2}>
+        {/* Row 2: title */}
+        <Text style={[styles.title, isRead && styles.titleRead]} numberOfLines={2}>
           {item.title}
         </Text>
 
+        {/* Row 3: AI bullet summary */}
         <View style={styles.summaryRow}>
           <Text style={styles.aiLabel}>AI</Text>
-          <Text style={styles.summary} numberOfLines={3}>
-            {item.aiSummary}
-          </Text>
+          <View style={styles.bulletList}>
+            {item.aiSummary.slice(0, 3).map((point, i) => (
+              <View key={i} style={styles.bulletRow}>
+                <Text style={styles.bulletDot}>·</Text>
+                <Text style={styles.bulletText} numberOfLines={2}>{point}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
+        {/* Row 4: tickers + bookmark */}
         <View style={styles.bottomRow}>
-          {item.ticker ? (
+          {item.tickers.length > 0 ? (
             <View style={styles.tickerGroup}>
-              <View style={styles.tickerChip}>
-                <Text style={styles.tickerText}>{item.ticker}</Text>
-              </View>
-              <Text
-                style={[
-                  styles.priceChange,
-                  { color: pricePositive ? Colors.sentiment.positive : Colors.sentiment.negative },
-                ]}
-              >
-                {pricePositive ? '▲' : '▼'} {Math.abs(item.priceChange!).toFixed(2)}%
-              </Text>
+              {item.tickers.slice(0, 2).map((t) => (
+                <View key={t} style={styles.tickerChip}>
+                  <Text style={styles.tickerText}>{t}</Text>
+                </View>
+              ))}
+              {item.tickers.length > 2 && (
+                <Text style={styles.tickerOverflow}>+{item.tickers.length - 2}</Text>
+              )}
             </View>
           ) : (
             <View />
@@ -116,9 +121,9 @@ export const NewsCard = React.memo(({ item, onPress, onBookmark }: Props) => {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons
-              name={item.isBookmarked ? 'bookmark' : 'bookmark-outline'}
+              name={isBookmarked ? 'bookmark' : 'bookmark-outline'}
               size={IconSize.sm}
-              color={item.isBookmarked ? Colors.brand.accent : Colors.text.muted}
+              color={isBookmarked ? Colors.brand.accent : Colors.text.muted}
             />
           </TouchableOpacity>
         </View>
@@ -206,10 +211,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Layout.badgePaddingX,
     paddingVertical: Layout.badgePaddingY,
     borderRadius: Radius.badge,
-    marginTop: 1,
+    marginTop: 2,
     overflow: 'hidden',
   },
-  summary: {
+  bulletList: {
+    flex: 1,
+    gap: 3,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    gap: 4,
+    alignItems: 'flex-start',
+  },
+  bulletDot: {
+    fontSize: FontSize.body,
+    color: Colors.text.muted,
+    lineHeight: LineHeight.tight,
+    marginTop: 0,
+  },
+  bulletText: {
     flex: 1,
     fontSize: FontSize.body,
     color: Colors.text.secondary,
@@ -238,9 +258,8 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: FontFamily.mono ?? undefined,
   },
-  priceChange: {
-    fontSize: FontSize.body,
-    fontWeight: FontWeight.semibold,
-    fontFamily: FontFamily.mono ?? undefined,
+  tickerOverflow: {
+    fontSize: FontSize.small,
+    color: Colors.text.muted,
   },
 });
