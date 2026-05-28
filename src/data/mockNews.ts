@@ -14,6 +14,7 @@ export const mockNews: News[] = [
     importance: 'high',
     category: 'regulatory',
     tickers: ['BUMI'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/pengumuman-perusahaan/',
     excerpt:
       'Bursa Efek Indonesia menghentikan sementara perdagangan saham BUMI per 27 Mei 2026 karena emiten belum menyampaikan laporan keuangan FY2025 melampaui tenggat regulasi OJK.',
     aiSummary: [
@@ -30,6 +31,7 @@ export const mockNews: News[] = [
     importance: 'high',
     category: 'regulatory',
     tickers: [],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/pengumuman-perusahaan/',
     excerpt:
       'Otoritas Jasa Keuangan resmi menetapkan aturan baru rasio pembiayaan margin trading dari 1:5 menjadi 1:3 yang akan berlaku efektif pada 1 Agustus 2026 untuk seluruh sekuritas.',
     aiSummary: [
@@ -48,6 +50,7 @@ export const mockNews: News[] = [
     importance: 'high',
     category: 'corporate_action',
     tickers: ['BBCA'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/pengumuman-perusahaan/',
     excerpt:
       'Bank Central Asia menetapkan dividen interim sebesar Rp 340 per saham untuk tahun buku 2026, melampaui estimasi konsensus analis di Rp 310 per saham dengan cum-dividen pada 12 Juni 2026.',
     aiSummary: [
@@ -64,6 +67,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'corporate_action',
     tickers: ['BREN'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi/',
     excerpt:
       'Barito Renewables Energy berencana menerbitkan rights issue senilai Rp 5 triliun dengan rasio 1:4 yang dananya akan dialokasikan untuk pengembangan proyek PLTP dan PLTS berkapasitas 1.200 MW di Sulawesi.',
     aiSummary: [
@@ -80,6 +84,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'corporate_action',
     tickers: ['TLKM'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi/',
     excerpt:
       'Telkom Indonesia menggelar Rapat Umum Pemegang Saham Tahunan pada 15 Juni 2026, dengan agenda utama persetujuan laporan keuangan FY2025, pemilihan direksi periode 2026–2029, dan pengesahan dividen final.',
     aiSummary: [
@@ -96,6 +101,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'corporate_action',
     tickers: ['ASII'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi/',
     excerpt:
       'Astra International mengakuisisi 30% saham minoritas PT Astratel Nusantara senilai Rp 1,8 triliun, meningkatkan kepemilikan menjadi 95,2% dan memperkuat integrasi bisnis infrastruktur telekomunikasi.',
     aiSummary: [
@@ -112,6 +118,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'corporate_action',
     tickers: ['BMRI'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/pengumuman-perusahaan/',
     excerpt:
       'Bank Mandiri secara resmi mengajukan permohonan persetujuan aksi korporasi stock split dengan rasio 1:2 kepada OJK untuk meningkatkan likuiditas dan aksesibilitas saham bagi investor ritel.',
     aiSummary: [
@@ -130,6 +137,7 @@ export const mockNews: News[] = [
     importance: 'high',
     category: 'earnings',
     tickers: ['BBRI'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi/',
     excerpt:
       'Bank Rakyat Indonesia membukukan laba bersih kuartal pertama 2026 sebesar Rp 15,7 triliun, tumbuh 12% dibanding periode yang sama tahun lalu, didorong ekspansi kredit UMKM dan perbaikan kualitas aset.',
     aiSummary: [
@@ -146,6 +154,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'earnings',
     tickers: ['GOTO'],
+    url: 'https://www.idx.co.id/id/perusahaan-tercatat/keterbukaan-informasi/',
     excerpt:
       'GoTo Group melaporkan pertumbuhan revenue GoPay sebesar 28% YoY di kuartal pertama 2026, sementara operating loss konsolidasi menyempit 42% YoY menjadi Rp 1,1 triliun dengan proyeksi break-even di Q3 2026.',
     aiSummary: [
@@ -162,6 +171,7 @@ export const mockNews: News[] = [
     importance: 'low',
     category: 'earnings',
     tickers: ['UNVR'],
+    url: 'https://www.kontan.co.id/news/pasar-modal',
     excerpt:
       'Unilever Indonesia membukukan pendapatan kuartal pertama 2026 sebesar Rp 10,4 triliun, turun 3% YoY, terbebani tekanan daya beli konsumen segmen menengah bawah dan persaingan private label yang kian ketat.',
     aiSummary: [
@@ -180,6 +190,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'market_news',
     tickers: ['BBCA', 'BBRI', 'BMRI'],
+    url: 'https://www.cnbcindonesia.com/market/',
     excerpt:
       'Indeks Harga Saham Gabungan ditutup menguat 1,2% ke level 7.312 setelah melemah selama tiga sesi perdagangan berturut-turut, dipicu data inflasi AS yang lebih lunak dari perkiraan.',
     aiSummary: [
@@ -196,6 +207,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'market_news',
     tickers: ['MEDC'],
+    url: 'https://www.bisnis.com/pasar-modal/',
     excerpt:
       'Saham Medco Energi Internasional menguat 7,1% menyusul lonjakan harga minyak mentah Brent menembus level $85 per barel untuk pertama kalinya dalam delapan bulan, didorong penurunan stok AS yang lebih dalam dari perkiraan.',
     aiSummary: [
@@ -212,6 +224,7 @@ export const mockNews: News[] = [
     importance: 'medium',
     category: 'market_news',
     tickers: ['ANTM'],
+    url: 'https://www.kontan.co.id/news/pasar-modal',
     excerpt:
       'Saham Aneka Tambang menguat 5,3% mengikuti lonjakan harga nikel di London Metal Exchange ke $18.750 per ton setelah pemerintah Filipina mengumumkan pembatasan ekspor bijih nikel yang mengejutkan pasar.',
     aiSummary: [
@@ -228,6 +241,7 @@ export const mockNews: News[] = [
     importance: 'low',
     category: 'market_news',
     tickers: ['BBCA', 'BBRI', 'BMRI', 'INDF'],
+    url: 'https://www.cnbcindonesia.com/market/',
     excerpt:
       'Saham-saham perbankan besar ditutup kompak menguat dengan kenaikan rata-rata 1,1%, memimpin kenaikan Indeks Harga Saham Gabungan setelah rilisnya data penyaluran kredit perbankan nasional Maret 2026.',
     aiSummary: [
@@ -246,6 +260,7 @@ export const mockNews: News[] = [
     importance: 'high',
     category: 'macro',
     tickers: [],
+    url: 'https://www.cnbcindonesia.com/market/',
     excerpt:
       'Bank Indonesia kembali mempertahankan suku bunga acuan BI Rate di level 5,75% dalam Rapat Dewan Gubernur Mei 2026, dengan alasan menjaga stabilitas nilai tukar rupiah dan mengendalikan inflasi yang terjaga di 2,8% YoY.',
     aiSummary: [

@@ -25,6 +25,7 @@ export interface News {
   tickers: string[];
   importance: NewsImportance;
   category: NewsCategory;
+  url?: string;
 }
 
 // Used by FeedHeader filter chips and BeritaScreen filter logic

@@ -2,11 +2,13 @@ import React, { useCallback, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { router } from 'expo-router';
+
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
 import { Colors, FontSize, Layout } from '@/src/theme';
-import { MOCK_NEWS } from '@/data/mock-news';
-import { FeedFilter, NewsItem } from '@/types/news';
+import { mockNews } from '@/src/data/mockNews';
+import { FeedFilter, News, NewsCategory } from '@/src/types/news';
 
 const MARKET = {
   index:  'IHSG',
@@ -15,41 +17,52 @@ const MARKET = {
   isOpen: true,
 };
 
-const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsItem['category'][]> = {
-  all:       ['announcement', 'market', 'macro', 'sector', 'global'],
-  watchlist: ['announcement'],
-  idx:       ['announcement', 'market'],
+const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsCategory[]> = {
+  all:       ['corporate_action', 'earnings', 'market_news', 'regulatory', 'macro'],
+  watchlist: ['corporate_action', 'earnings'],
+  idx:       ['corporate_action', 'earnings', 'regulatory'],
   macro:     ['macro'],
-  global:    ['global'],
+  global:    ['market_news'],
 };
 
-export default function BeritaScreen() {
-  const [news, setNews]                = useState<NewsItem[]>(MOCK_NEWS);
-  const [activeFilter, setActiveFilter] = useState<FeedFilter>('all');
+const sorted = [...mockNews].sort(
+  (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+);
 
-  const filtered = news.filter((item) =>
+export default function BeritaScreen() {
+  const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
+  const [readIds,        setReadIds]       = useState(new Set<string>());
+  const [bookmarkedIds,  setBookmarkedIds] = useState(new Set<string>());
+
+  const filtered = sorted.filter((item) =>
     CATEGORY_FOR_FILTER[activeFilter].includes(item.category)
   );
 
   const handlePress = useCallback((id: string) => {
-    setNews((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, isRead: true } : item))
-    );
+    setReadIds((prev) => new Set(prev).add(id));
+    router.push(`/news/${id}` as never);
   }, []);
 
   const handleBookmark = useCallback((id: string) => {
-    setNews((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, isBookmarked: !item.isBookmarked } : item
-      )
-    );
+    setBookmarkedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
   const renderItem = useCallback(
-    ({ item }: { item: NewsItem }) => (
-      <NewsCard item={item} onPress={handlePress} onBookmark={handleBookmark} />
+    ({ item }: { item: News }) => (
+      <NewsCard
+        item={item}
+        isRead={readIds.has(item.id)}
+        isBookmarked={bookmarkedIds.has(item.id)}
+        onPress={handlePress}
+        onBookmark={handleBookmark}
+      />
     ),
-    [handlePress, handleBookmark]
+    [readIds, bookmarkedIds, handlePress, handleBookmark]
   );
 
   const renderHeader = useCallback(
