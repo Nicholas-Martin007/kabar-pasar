@@ -145,8 +145,13 @@ async def count_news(session: AsyncSession) -> int:
 # ── Telegram subscribers ──────────────────────────────────────────────────────
 
 async def ensure_subscriber(session: AsyncSession, chat_id: str) -> None:
+    # New /start subscribers default to ALL news (opt-out via /mute or /all off).
     if await session.get(TelegramSubscriber, chat_id) is None:
-        session.add(TelegramSubscriber(chat_id=chat_id, tickers=[]))
+        session.add(
+            TelegramSubscriber(
+                chat_id=chat_id, tickers=[], keywords=[], mute=[], all_news=True
+            )
+        )
         await session.commit()
 
 
@@ -195,6 +200,7 @@ async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
             "chat_id": r.chat_id,
             "tickers": list(r.tickers or []),
             "keywords": list(r.keywords or []),
+            "mute": list(r.mute or []),
             "all_news": bool(r.all_news),
         }
         for r in rows
@@ -211,8 +217,59 @@ async def get_subscriber(
         "chat_id": r.chat_id,
         "tickers": list(r.tickers or []),
         "keywords": list(r.keywords or []),
+        "mute": list(r.mute or []),
         "all_news": bool(r.all_news),
     }
+
+
+async def add_subscriber_mute(
+    session: AsyncSession, chat_id: str, keyword: str
+) -> List[str]:
+    kw = keyword.strip().lower()
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(
+            chat_id=chat_id, tickers=[], keywords=[], mute=[], all_news=True
+        )
+        session.add(sub)
+    words = list(sub.mute or [])
+    if kw and kw not in words:
+        words.append(kw)
+    sub.mute = sorted(words)
+    await session.commit()
+    return sub.mute
+
+
+async def remove_subscriber_mute(
+    session: AsyncSession, chat_id: str, keyword: str
+) -> List[str]:
+    kw = keyword.strip().lower()
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        return []
+    sub.mute = [w for w in (sub.mute or []) if w != kw]
+    await session.commit()
+    return sub.mute
+
+
+async def latest_news(
+    session: AsyncSession, limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Most recent cached news across all sources."""
+    rows = (
+        await session.execute(
+            select(NewsRow).order_by(NewsRow.published_at.desc()).limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "title": r.title,
+            "source": r.source,
+            "url": r.url,
+            "tickers": list(r.tickers or []),
+        }
+        for r in rows
+    ]
 
 
 async def add_subscriber_keyword(
