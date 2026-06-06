@@ -22,6 +22,8 @@ export interface News {
   publishedAt: string;
   excerpt: string;
   aiSummary: string[];
+  /** One-sentence investor impact line from the backend AI summariser. */
+  impact?: string;
   tickers: string[];
   importance: NewsImportance;
   category: NewsCategory;

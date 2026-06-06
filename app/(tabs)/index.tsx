@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
-import { mockNews } from '@/src/data/mockNews';
+import { useNewsFeed } from '@/src/hooks/useNews';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
@@ -35,12 +35,6 @@ import { getGreeting, getMarketStatus } from '@/utils/market';
 const IHSG = { value: 7_234.56, changePercent: 0.42 };
 const UNREAD_COUNT = 3;
 
-// ── Static derived data ───────────────────────────────────────────────────────
-const topNews: News[] = mockNews
-  .filter((n) => n.importance === 'high')
-  .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
-  .slice(0, 3);
-
 function formatIHSG(value: number): string {
   const [int, dec] = value.toFixed(2).split('.');
   return int.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
@@ -50,11 +44,25 @@ function formatIHSG(value: number): string {
 
 export default function HomeScreen() {
   const { items: watchlistItems } = useWatchlist();
+  const { data: allNews, refetch } = useNewsFeed();
   const [greeting,      setGreeting]      = useState(getGreeting);
   const [marketStatus,  setMarketStatus]  = useState(getMarketStatus);
   const [refreshing,    setRefreshing]    = useState(false);
   const [readIds,       setReadIds]       = useState(new Set<string>());
   const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
+
+  // Top 3 high-importance items, newest first.
+  const topNews: News[] = React.useMemo(
+    () =>
+      allNews
+        .filter((n) => n.importance === 'high')
+        .sort(
+          (a, b) =>
+            new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        )
+        .slice(0, 3),
+    [allNews]
+  );
 
   const watchlistPreview: Stock[] = watchlistItems
     .slice(0, 4)
@@ -63,14 +71,16 @@ export default function HomeScreen() {
       return s ? [s] : [];
     });
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setGreeting(getGreeting());
-      setMarketStatus(getMarketStatus());
+    setGreeting(getGreeting());
+    setMarketStatus(getMarketStatus());
+    try {
+      await refetch();
+    } finally {
       setRefreshing(false);
-    }, 1200);
-  }, []);
+    }
+  }, [refetch]);
 
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));

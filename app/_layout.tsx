@@ -1,4 +1,5 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
@@ -11,10 +12,14 @@ export const unstable_settings = {
   anchor: '(tabs)',
 };
 
+// Single client for the whole app — created once at module scope.
+const queryClient = new QueryClient();
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
+    <QueryClientProvider client={queryClient}>
     <SettingsProvider>
     <WatchlistProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -28,5 +33,6 @@ export default function RootLayout() {
       </ThemeProvider>
     </WatchlistProvider>
     </SettingsProvider>
+    </QueryClientProvider>
   );
 }

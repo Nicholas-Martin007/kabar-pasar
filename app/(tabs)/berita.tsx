@@ -6,8 +6,8 @@ import { router } from 'expo-router';
 
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
+import { useNewsFeed } from '@/src/hooks/useNews';
 import { Colors, FontSize, Layout } from '@/src/theme';
-import { mockNews } from '@/src/data/mockNews';
 import { FeedFilter, News, NewsCategory } from '@/src/types/news';
 
 const MARKET = {
@@ -25,17 +25,23 @@ const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsCategory[]> = {
   global:    ['market_news'],
 };
 
-const sorted = [...mockNews].sort(
-  (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-);
-
 export default function BeritaScreen() {
+  const { data: allNews } = useNewsFeed();
   const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
   const [readIds,        setReadIds]       = useState(new Set<string>());
   const [bookmarkedIds,  setBookmarkedIds] = useState(new Set<string>());
 
-  const filtered = sorted.filter((item) =>
-    CATEGORY_FOR_FILTER[activeFilter].includes(item.category)
+  const filtered = React.useMemo(
+    () =>
+      [...allNews]
+        .sort(
+          (a, b) =>
+            new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        )
+        .filter((item) =>
+          CATEGORY_FOR_FILTER[activeFilter].includes(item.category)
+        ),
+    [allNews, activeFilter]
   );
 
   const handlePress = useCallback((id: string) => {

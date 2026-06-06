@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NewsCard } from '@/components/news-card';
-import { mockNews } from '@/src/data/mockNews';
+import { useNewsFeed } from '@/src/hooks/useNews';
 import {
   Border,
   Colors,
@@ -71,7 +71,8 @@ function NotFound() {
 
 export default function NewsDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const news = mockNews.find((n) => n.id === id);
+  const { data: allNews } = useNewsFeed({ limit: 200 });
+  const news = allNews.find((n) => n.id === id);
 
   const [readIds,       setReadIds]       = useState(new Set<string>());
   const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
@@ -97,7 +98,7 @@ export default function NewsDetailScreen() {
   const categoryLabel   = CATEGORY_LABEL[news.category];
 
   const relatedNews: News[] = news.tickers.length > 0
-    ? mockNews
+    ? allNews
         .filter(
           (n) =>
             n.id !== news.id &&
