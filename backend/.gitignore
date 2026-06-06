@@ -7,3 +7,10 @@ venv/
 *.egg-info/
 dist/
 .pytest_cache/
+
+# Local SQLite database (use DATABASE_URL env to override)
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

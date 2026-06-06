@@ -46,6 +46,7 @@ class News(BaseModel):
     published_at: str                          # ISO 8601
     excerpt:      str
     ai_summary:   List[str]       = Field(default_factory=list)
+    impact:       Optional[str]   = None        # 1-kalimat dampak buat investor
     tickers:      List[str]       = Field(default_factory=list)
     importance:   NewsImportance  = NewsImportance.MEDIUM
     category:     NewsCategory    = NewsCategory.MARKET_NEWS

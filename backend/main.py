@@ -1,24 +1,56 @@
+import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Dict
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from db.session import dispose as db_dispose
+from db.session import init_db
 from routers import news as news_router
+from services.scheduler import refresh_news_job, shutdown_scheduler, start_scheduler
 
 load_dotenv()
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
 )
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await init_db()
+    start_scheduler()
+    # Kick off an initial refresh in the background — don't block server startup
+    asyncio.create_task(_initial_refresh())
+    logger.info("app.startup_complete")
+    try:
+        yield
+    finally:
+        # Shutdown
+        shutdown_scheduler()
+        await db_dispose()
+        logger.info("app.shutdown_complete")
+
+
+async def _initial_refresh() -> None:
+    try:
+        await refresh_news_job()
+    except Exception as exc:
+        logger.warning("app.initial_refresh_failed error=%s", exc)
+
 
 app = FastAPI(
     title="Kabar Pasar API",
     description="Financial news aggregation backend for Kabar Pasar.",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 # ── CORS ─────────────────────────────────────────────────────────────────────

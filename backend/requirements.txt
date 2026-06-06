@@ -5,3 +5,13 @@ pydantic>=2.7.0
 python-dotenv>=1.0.1
 httpx>=0.27.0
 anthropic>=0.28.0
+
+# HTML scraping (BEI announcements)
+beautifulsoup4>=4.12.0
+
+# Persistence (SQLite default, PostgreSQL swap via DATABASE_URL)
+sqlalchemy[asyncio]>=2.0.30
+aiosqlite>=0.20.0
+
+# Scheduled background refresh
+apscheduler>=3.10.4

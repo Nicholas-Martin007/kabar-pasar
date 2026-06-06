@@ -1,43 +1,69 @@
-import os
-from typing import List
+"""
+News API — reads cached results from SQLite (fast).
+Live fetch + AI happens in the background scheduler; trigger a one-shot
+refresh via POST /refresh.
+"""
+
+import logging
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from models.news import News
-from services.ai_summarizer import enrich_with_summaries
-from services.rss_service import fetch_all_news
+from db.repository import count_news, query_news
+from db.session import get_session
+from models.news import News, NewsImportance, NewsSource
+from services.scheduler import refresh_news_job
 
-router = APIRouter(prefix="/news", tags=["news"])
+logger = logging.getLogger(__name__)
 
-# How many items get AI summaries per request (cost control)
-_AI_BATCH = int(os.getenv("AI_SUMMARY_BATCH", "10"))
+router = APIRouter(tags=["news"])
 
 
-@router.get("", response_model=List[News])
+@router.get("/news", response_model=List[News])
 async def get_news(
-    limit: int = Query(default=50, ge=1, le=200, description="Max items to return"),
-    ticker: str = Query(default=None, description="Filter by ticker (e.g. BBCA)"),
+    limit:      int                      = Query(50, ge=1, le=200),
+    source:     Optional[NewsSource]     = Query(None, description="Filter by source"),
+    importance: Optional[NewsImportance] = Query(None, description="high / medium / low"),
+    ticker:     Optional[str]            = Query(None, description="e.g. BBCA"),
 ) -> JSONResponse:
     """
-    Fetch and return parsed news from all RSS sources.
-    Results are sorted by published_at descending.
-    Top AI_SUMMARY_BATCH items (default 10) are enriched with AI-generated bullets.
+    Read cached news sorted by published_at desc.
+    Filters: ?source=BEI&importance=high&ticker=BBRI
     """
     try:
-        items = fetch_all_news()
+        async with get_session() as session:
+            items = await query_news(
+                session,
+                source=source.value if source else None,
+                importance=importance.value if importance else None,
+                ticker=ticker,
+                limit=limit,
+            )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Feed fetch error: {exc}")
-
-    if ticker:
-        items = [n for n in items if ticker.upper() in n.tickers]
-
-    items = items[:limit]
-
-    try:
-        items = await enrich_with_summaries(items, limit=_AI_BATCH)
-    except Exception as exc:
-        # AI enrichment is best-effort — never block news delivery
-        pass
+        logger.exception("news.query_failed")
+        raise HTTPException(status_code=500, detail=f"DB read error: {exc}")
 
     return JSONResponse(content=[n.model_dump(by_alias=True) for n in items])
+
+
+@router.post("/refresh", tags=["meta"])
+async def trigger_refresh() -> dict:
+    """
+    Manually trigger a fetch + summarise cycle. Awaits completion so the
+    response includes counts. Use for testing or after editing source list.
+    """
+    try:
+        result = await refresh_news_job()
+    except Exception as exc:
+        logger.exception("refresh.failed")
+        raise HTTPException(status_code=502, detail=f"Refresh error: {exc}")
+    return {"status": "ok", **result}
+
+
+@router.get("/news/stats", tags=["meta"])
+async def news_stats() -> dict:
+    """Quick health probe: how many items are cached?"""
+    async with get_session() as session:
+        total = await count_news(session)
+    return {"cached_news_count": total}
