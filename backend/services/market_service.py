@@ -164,6 +164,49 @@ async def _fetch_row_quote(ticker: str) -> dict:
     }
 
 
+async def fetch_chart_data(
+    ticker: str, range_: str, interval: str
+) -> dict:
+    """
+    Price series for charting: `points` (closes, for the line chart) and
+    `candles` (OHLC bars, for the candlestick chart) — one fetch, both shapes.
+    """
+    symbol = to_yahoo_symbol(ticker)
+    async with httpx.AsyncClient(timeout=10, headers=_UA) as client:
+        resp = await client.get(
+            YAHOO_CHART.format(symbol=symbol),
+            params={"range": range_, "interval": interval},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+
+    results = (payload.get("chart") or {}).get("result") or []
+    if not results:
+        return {"currency": None, "points": [], "candles": []}
+    result = results[0]
+    meta = result.get("meta", {})
+    q = (result.get("indicators", {}).get("quote") or [{}])[0]
+    opens = q.get("open") or []
+    highs = q.get("high") or []
+    lows = q.get("low") or []
+    closes = q.get("close") or []
+
+    points: List[Optional[float]] = []
+    candles: List[dict] = []
+    for o, h, l, c in zip(opens, highs, lows, closes):
+        if c is not None:
+            points.append(_round(c))
+        if None not in (o, h, l, c):
+            candles.append(
+                {"o": _round(o), "h": _round(h), "l": _round(l), "c": _round(c)}
+            )
+    return {
+        "currency": meta.get("currency"),
+        "points": [p for p in points if p is not None],
+        "candles": candles,
+    }
+
+
 async def fetch_quotes(tickers: List[str]) -> List[dict]:
     """Batched live quotes for a watchlist — fetched concurrently, deduped."""
     unique = list(dict.fromkeys(t.strip().upper() for t in tickers if t.strip()))

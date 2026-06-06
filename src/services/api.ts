@@ -88,11 +88,19 @@ export interface Quote {
   longName?: string | null;
 }
 
+export interface Candle {
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+}
+
 export interface ChartResponse {
   ticker: string;
   range: string;
   currency: string | null;
   points: (number | null)[];
+  candles: Candle[];
 }
 
 export type ChartRange = '1H' | '1D' | '1W' | '1M' | '1Y';

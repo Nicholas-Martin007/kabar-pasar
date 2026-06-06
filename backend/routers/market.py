@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from services.market_service import (
     IHSG_SYMBOL,
     RANGE_INTERVAL,
+    fetch_chart_data,
     fetch_quote,
     fetch_quotes,
     fetch_reaction,
@@ -58,16 +59,17 @@ async def market_chart(
     ticker: str,
     range: str = Query("1M", description="1H | 1D | 1W | 1M | 1Y"),
 ) -> dict:
-    """Sparkline/price points for a ticker over a time range."""
+    """Line points + OHLC candles for a ticker over a time range."""
     rng = range.upper()
     yahoo_range, interval = RANGE_INTERVAL.get(rng, ("1mo", "1d"))
     try:
-        quote = await fetch_quote(ticker, range_=yahoo_range, interval=interval)
+        data = await fetch_chart_data(ticker, yahoo_range, interval)
         return {
-            "ticker": quote["ticker"],
+            "ticker": ticker.strip().upper(),
             "range": rng,
-            "currency": quote["currency"],
-            "points": quote["sparkline"],
+            "currency": data["currency"],
+            "points": data["points"],
+            "candles": data["candles"],
         }
     except Exception as exc:
         logger.warning("market.chart_failed ticker=%s error=%s", ticker, exc)

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CandlestickChart } from '@/components/candlestick-chart';
 import { LineChart } from '@/components/line-chart';
 import { NewsCard } from '@/components/news-card';
 import { mockStocks } from '@/src/data/mockStocks';
@@ -113,6 +114,7 @@ export default function StockDetailScreen() {
 
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const [activeRange, setActiveRange] = useState<TimeRange>('1W');
+  const [chartStyle, setChartStyle]   = useState<'line' | 'candle'>('line');
   const [readIds,       setReadIds]   = useState(new Set<string>());
 
   // Live market data (falls back to mock stock values when unavailable).
@@ -188,6 +190,8 @@ export default function StockDetailScreen() {
     (p): p is number => p !== null
   );
   const sparkline     = livePoints.length > 1 ? livePoints : stock.sparkline;
+  const candles       = chart?.candles ?? [];
+  const canShowCandles = candles.length > 1;
 
   const positive    = changePercent >= 0;
   const changeColor = positive ? Colors.sentiment.positive : Colors.sentiment.negative;
@@ -307,12 +311,48 @@ export default function StockDetailScreen() {
 
         {/* ── Chart ───────────────────────────────────────────────────── */}
         <View style={styles.chartCard}>
-          <LineChart
-            data={sparkline}
-            width={CHART_W - Layout.cardPadding * 2 - 48}
-            height={CHART_H}
-            positive={positive}
-          />
+          {/* Chart-style toggle: line / candlestick */}
+          <View style={styles.chartStyleRow}>
+            <TouchableOpacity
+              style={[styles.styleBtn, chartStyle === 'line' && styles.styleBtnActive]}
+              onPress={() => setChartStyle('line')}
+              activeOpacity={0.7}
+              accessibilityLabel="Grafik garis"
+            >
+              <Ionicons
+                name="pulse"
+                size={15}
+                color={chartStyle === 'line' ? Colors.brand.accent : Colors.text.muted}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.styleBtn, chartStyle === 'candle' && styles.styleBtnActive]}
+              onPress={() => setChartStyle('candle')}
+              activeOpacity={0.7}
+              accessibilityLabel="Grafik candlestick"
+            >
+              <Ionicons
+                name="stats-chart"
+                size={15}
+                color={chartStyle === 'candle' ? Colors.brand.accent : Colors.text.muted}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {chartStyle === 'candle' && canShowCandles ? (
+            <CandlestickChart
+              candles={candles}
+              width={CHART_W - Layout.cardPadding * 2 - 48}
+              height={CHART_H}
+            />
+          ) : (
+            <LineChart
+              data={sparkline}
+              width={CHART_W - Layout.cardPadding * 2 - 48}
+              height={CHART_H}
+              positive={positive}
+            />
+          )}
 
           {/* Time range selector */}
           <View style={styles.rangeRow}>
@@ -523,6 +563,22 @@ const styles = StyleSheet.create({
     borderColor: Colors.border.default,
     padding: Layout.cardPadding,
     gap: 16,
+  },
+  chartStyleRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 6,
+    marginBottom: 4,
+  },
+  styleBtn: {
+    padding: 6,
+    borderRadius: Radius.chip,
+    borderWidth: Border.width,
+    borderColor: 'transparent',
+  },
+  styleBtnActive: {
+    backgroundColor: withAlpha13(Colors.brand.accent),
+    borderColor: Colors.brand.accent,
   },
   rangeRow: {
     flexDirection: 'row',
