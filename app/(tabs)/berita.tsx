@@ -58,7 +58,8 @@ export default function BeritaScreen() {
         .map((n) => ({ key: n.id, ticker: n.tickers[0], at: n.publishedAt })),
     [filtered]
   );
-  const { data: reactionMap } = useReactions(reactionItems);
+  const { data: reactionMap, isLoading: reactionsLoading } =
+    useReactions(reactionItems);
 
   const handlePress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
@@ -83,9 +84,10 @@ export default function BeritaScreen() {
         onPress={handlePress}
         onBookmark={handleBookmark}
         reaction={reactionMap?.get(item.id)}
+        reactionLoading={reactionsLoading}
       />
     ),
-    [readIds, bookmarkedIds, handlePress, handleBookmark, reactionMap]
+    [readIds, bookmarkedIds, handlePress, handleBookmark, reactionMap, reactionsLoading]
   );
 
   const renderHeader = useCallback(

@@ -14,7 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { useNewsFeed } from '@/src/hooks/useNews';
-import { useIndex } from '@/src/hooks/useMarket';
+import { useIndex, useReactions } from '@/src/hooks/useMarket';
+import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
@@ -65,6 +66,17 @@ export default function HomeScreen() {
         .slice(0, 3),
     [allNews]
   );
+
+  // Batched price reactions for the top news cards (one request).
+  const reactionItems: ReactionItem[] = React.useMemo(
+    () =>
+      topNews
+        .filter((n) => n.tickers.length > 0)
+        .map((n) => ({ key: n.id, ticker: n.tickers[0], at: n.publishedAt })),
+    [topNews]
+  );
+  const { data: reactionMap, isLoading: reactionsLoading } =
+    useReactions(reactionItems);
 
   const watchlistPreview: Stock[] = watchlistItems
     .slice(0, 4)
@@ -178,6 +190,8 @@ export default function HomeScreen() {
                 isBookmarked={bookmarkedIds.has(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}
+                reaction={reactionMap?.get(item.id)}
+                reactionLoading={reactionsLoading}
               />
             ))
           )}

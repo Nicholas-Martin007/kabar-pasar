@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import {
   Border,
@@ -27,6 +27,32 @@ interface Props {
   onBookmark: (id: string) => void;
   /** Optional post-news price reaction badge (news -> price linkage). */
   reaction?: Reaction | null;
+  /** Show a shimmer placeholder while the batched reaction is resolving. */
+  reactionLoading?: boolean;
+}
+
+/** Pulsing skeleton shown in place of the reaction badge while it loads. */
+function ReactionSkeleton() {
+  const opacity = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.4,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.View style={[styles.reactionSkeleton, { opacity }]} />;
 }
 
 const IMPORTANCE_COLOR: Record<NewsImportance, string> = {
@@ -50,7 +76,7 @@ const SOURCE_COLOR: Record<NewsSource, string> = {
   'IR Emiten':        Colors.source['IR Emiten'],
 };
 
-export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark, reaction }: Props) => {
+export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark, reaction, reactionLoading }: Props) => {
   const stripeColor = IMPORTANCE_COLOR[item.importance];
   const sourceColor = SOURCE_COLOR[item.source];
 
@@ -58,6 +84,9 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
     reaction?.available && reaction.reactionPercent != null
       ? reaction.reactionPercent
       : null;
+  // Shimmer only for cards that have a ticker and are still awaiting a result.
+  const showReactionSkeleton =
+    !!reactionLoading && reactionPct == null && item.tickers.length > 0;
   const reactionColor =
     reactionPct == null
       ? Colors.text.muted
@@ -129,7 +158,7 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
               </View>
             )}
 
-            {reactionPct != null && (
+            {reactionPct != null ? (
               <View
                 style={[
                   styles.reactionBadge,
@@ -146,7 +175,9 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
                   {reactionPct.toFixed(1).replace('.', ',')}%
                 </Text>
               </View>
-            )}
+            ) : showReactionSkeleton ? (
+              <ReactionSkeleton />
+            ) : null}
           </View>
 
           <TouchableOpacity
@@ -298,6 +329,12 @@ const styles = StyleSheet.create({
     fontSize: FontSize.small,
     fontWeight: FontWeight.bold,
     fontFamily: FontFamily.mono ?? undefined,
+  },
+  reactionSkeleton: {
+    width: 52,
+    height: 18,
+    borderRadius: Radius.chip,
+    backgroundColor: Colors.border.default,
   },
   tickerChip: {
     backgroundColor: Colors.border.default,
