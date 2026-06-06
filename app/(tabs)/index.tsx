@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { useNewsFeed } from '@/src/hooks/useNews';
+import { useIndex } from '@/src/hooks/useMarket';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
@@ -31,8 +32,8 @@ import { News } from '@/src/types/news';
 import { Stock } from '@/src/types/stock';
 import { getGreeting, getMarketStatus } from '@/utils/market';
 
-// ── Mock market snapshot (replace with live API later) ──────────────────────
-const IHSG = { value: 7_234.56, changePercent: 0.42 };
+// ── Mock IHSG snapshot — fallback when the market API is unreachable ─────────
+const IHSG_FALLBACK = { value: 7_234.56, changePercent: 0.42 };
 const UNREAD_COUNT = 3;
 
 function formatIHSG(value: number): string {
@@ -45,6 +46,7 @@ function formatIHSG(value: number): string {
 export default function HomeScreen() {
   const { items: watchlistItems } = useWatchlist();
   const { data: allNews, refetch } = useNewsFeed();
+  const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const [greeting,      setGreeting]      = useState(getGreeting);
   const [marketStatus,  setMarketStatus]  = useState(getMarketStatus);
   const [refreshing,    setRefreshing]    = useState(false);
@@ -76,11 +78,11 @@ export default function HomeScreen() {
     setGreeting(getGreeting());
     setMarketStatus(getMarketStatus());
     try {
-      await refetch();
+      await Promise.all([refetch(), refetchIndex()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetch]);
+  }, [refetch, refetchIndex]);
 
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
@@ -100,9 +102,13 @@ export default function HomeScreen() {
     router.push(`/stock/${ticker}` as never);
   }, []);
 
+  // Live IHSG with graceful fallback to mock values.
+  const ihsgValue  = indexQuote?.price ?? IHSG_FALLBACK.value;
+  const ihsgChange = indexQuote?.changePercent ?? IHSG_FALLBACK.changePercent;
+
   const statusColor  = marketStatus.isOpen ? Colors.sentiment.positive : Colors.text.muted;
-  const changeColor  = IHSG.changePercent >= 0 ? Colors.sentiment.positive : Colors.sentiment.negative;
-  const changePrefix = IHSG.changePercent >= 0 ? '+' : '';
+  const changeColor  = ihsgChange >= 0 ? Colors.sentiment.positive : Colors.sentiment.negative;
+  const changePrefix = ihsgChange >= 0 ? '+' : '';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -151,9 +157,9 @@ export default function HomeScreen() {
             <Text style={styles.marketTimer}>{marketStatus.label}</Text>
           </View>
           <View style={styles.marketBottomRow}>
-            <Text style={styles.ihsgValue}>{formatIHSG(IHSG.value)}</Text>
+            <Text style={styles.ihsgValue}>{formatIHSG(ihsgValue)}</Text>
             <Text style={[styles.ihsgChange, { color: changeColor }]}>
-              {changePrefix}{IHSG.changePercent.toFixed(2).replace('.', ',')}%
+              {changePrefix}{ihsgChange.toFixed(2).replace('.', ',')}%
             </Text>
           </View>
         </View>

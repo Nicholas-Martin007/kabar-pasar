@@ -66,5 +66,48 @@ export async function triggerRefresh(): Promise<Record<string, unknown>> {
   return getJSON('/refresh', { method: 'POST' });
 }
 
+// ── Market data (Yahoo Finance via backend) ──────────────────────────────────
+
+export interface Quote {
+  ticker: string;
+  symbol: string;
+  price: number | null;
+  previousClose: number | null;
+  change: number | null;
+  changePercent: number | null;
+  currency: string | null;
+  marketState: string | null;
+  sparkline: (number | null)[];
+}
+
+export interface ChartResponse {
+  ticker: string;
+  range: string;
+  currency: string | null;
+  points: (number | null)[];
+}
+
+export type ChartRange = '1H' | '1D' | '1W' | '1M' | '1Y';
+
+/** IHSG (Jakarta Composite Index) quote. */
+export async function fetchIndex(): Promise<Quote> {
+  return getJSON<Quote>('/market/index');
+}
+
+/** Live quote for a single IDX stock, e.g. "BBCA". */
+export async function fetchQuote(ticker: string): Promise<Quote> {
+  return getJSON<Quote>(`/market/quote/${encodeURIComponent(ticker)}`);
+}
+
+/** Sparkline points for a ticker over a time range. */
+export async function fetchChart(
+  ticker: string,
+  range: ChartRange = '1M'
+): Promise<ChartResponse> {
+  return getJSON<ChartResponse>(
+    `/market/chart/${encodeURIComponent(ticker)}?range=${range}`
+  );
+}
+
 /** Bundled mock feed — used as an offline/dev fallback (see useNews hooks). */
 export const fallbackNews: News[] = mockNews;

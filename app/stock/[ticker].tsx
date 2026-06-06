@@ -17,6 +17,7 @@ import { mockNews } from '@/src/data/mockNews';
 import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
 import { useWatchlist } from '@/src/context/WatchlistContext';
+import { useChart, useQuote } from '@/src/hooks/useMarket';
 import {
   Border,
   Colors,
@@ -96,6 +97,10 @@ export default function StockDetailScreen() {
   const [readIds,       setReadIds]   = useState(new Set<string>());
   const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
 
+  // Live market data (falls back to mock stock values when unavailable).
+  const { data: quote } = useQuote(ticker);
+  const { data: chart } = useChart(ticker, activeRange);
+
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
     router.push(`/news/${id}` as never);
@@ -112,7 +117,16 @@ export default function StockDetailScreen() {
 
   if (!stock) return <NotFound ticker={ticker ?? '—'} />;
 
-  const positive    = stock.changePercent >= 0;
+  // Prefer live data; fall back to the bundled mock stock.
+  const price         = quote?.price ?? stock.price;
+  const change        = quote?.change ?? stock.change;
+  const changePercent = quote?.changePercent ?? stock.changePercent;
+  const livePoints    = (chart?.points ?? []).filter(
+    (p): p is number => p !== null
+  );
+  const sparkline     = livePoints.length > 1 ? livePoints : stock.sparkline;
+
+  const positive    = changePercent >= 0;
   const changeColor = positive ? Colors.sentiment.positive : Colors.sentiment.negative;
 
   const relatedNews: News[] = mockNews
@@ -156,13 +170,13 @@ export default function StockDetailScreen() {
       >
         {/* ── Price section ───────────────────────────────────────────── */}
         <View style={styles.priceSection}>
-          <Text style={styles.priceValue}>Rp {formatIDR(stock.price)}</Text>
+          <Text style={styles.priceValue}>Rp {formatIDR(price)}</Text>
           <View style={styles.priceChangeRow}>
             <Text style={[styles.changeAbs, { color: changeColor }]}>
-              {stock.change >= 0 ? '+' : ''}{formatIDR(stock.change)}
+              {change >= 0 ? '+' : ''}{formatIDR(change)}
             </Text>
             <Text style={[styles.changePct, { color: changeColor }]}>
-              ({formatPct(stock.changePercent)})
+              ({formatPct(changePercent)})
             </Text>
           </View>
           <Text style={styles.sectorLabel}>{stock.sector}</Text>
@@ -171,7 +185,7 @@ export default function StockDetailScreen() {
         {/* ── Chart ───────────────────────────────────────────────────── */}
         <View style={styles.chartCard}>
           <LineChart
-            data={stock.sparkline}
+            data={sparkline}
             width={CHART_W - Layout.cardPadding * 2 - 48}
             height={CHART_H}
             positive={positive}

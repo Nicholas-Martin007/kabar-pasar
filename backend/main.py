@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db.session import dispose as db_dispose
 from db.session import init_db
+from routers import market as market_router
 from routers import news as news_router
 from services.scheduler import refresh_news_job, shutdown_scheduler, start_scheduler
 
@@ -70,6 +71,7 @@ app.add_middleware(
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(news_router.router)
+app.include_router(market_router.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
