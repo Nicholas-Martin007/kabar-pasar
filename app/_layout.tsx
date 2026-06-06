@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BookmarksProvider } from '@/src/context/BookmarksContext';
+import { ReadProvider } from '@/src/context/ReadContext';
 import { SettingsProvider } from '@/src/context/SettingsContext';
 import { TelegramLinkProvider } from '@/src/context/TelegramLinkContext';
 import { WatchlistProvider } from '@/src/context/WatchlistContext';
@@ -25,17 +26,20 @@ export default function RootLayout() {
     <SettingsProvider>
     <WatchlistProvider>
     <BookmarksProvider>
+    <ReadProvider>
     <TelegramLinkProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
           <Stack.Screen name="news/[id]"     options={{ headerShown: false }} />
           <Stack.Screen name="stock/[ticker]" options={{ headerShown: false }} />
+          <Stack.Screen name="saved"         options={{ headerShown: false }} />
           <Stack.Screen name="modal"         options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
     </TelegramLinkProvider>
+    </ReadProvider>
     </BookmarksProvider>
     </WatchlistProvider>
     </SettingsProvider>

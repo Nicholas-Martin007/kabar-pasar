@@ -22,6 +22,7 @@ import {
   type ThemePreference,
   useSettings,
 } from '@/src/context/SettingsContext';
+import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useTelegramLink } from '@/src/context/TelegramLinkContext';
 import {
   Border,
@@ -313,6 +314,7 @@ export default function ProfileScreen() {
   } = useSettings();
 
   const [picker, setPicker] = useState<'from' | 'to' | null>(null);
+  const { count: savedCount } = useBookmarks();
 
   const { pushEnabled, importanceFilter, categories, quietHours } = notifications;
   const notifDisabled = !pushEnabled;
@@ -461,8 +463,8 @@ export default function ProfileScreen() {
           />
         </Section>
 
-        {/* ── Watchlist ─────────────────────────────────────────────────── */}
-        <Section title="Watchlist">
+        {/* ── Watchlist & berita ───────────────────────────────────────── */}
+        <Section title="Watchlist & Berita">
           <Row
             label="Kelola Watchlist"
             sublabel="Tambah atau hapus saham yang dipantau"
@@ -470,6 +472,14 @@ export default function ProfileScreen() {
               <Ionicons name="star-outline" size={IconSize.sm} color={Colors.brand.accent} />
             }
             onPress={() => router.navigate('/(tabs)/watchlist' as never)}
+          />
+          <Row
+            label="Berita Tersimpan"
+            sublabel={savedCount > 0 ? `${savedCount} berita` : 'Belum ada berita disimpan'}
+            left={
+              <Ionicons name="bookmark-outline" size={IconSize.sm} color={Colors.brand.accent} />
+            }
+            onPress={() => router.navigate('/saved' as never)}
             last
           />
         </Section>

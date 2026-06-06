@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   Alert,
   Linking,
@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NewsCard } from '@/components/news-card';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useRead } from '@/src/context/ReadContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useReaction } from '@/src/hooks/useMarket';
 import {
@@ -88,12 +89,20 @@ export default function NewsDetailScreen() {
   const { data: reaction } = useReaction(primaryTicker, news?.publishedAt);
 
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
-  const [readIds, setReadIds] = useState(new Set<string>());
+  const { isRead, markRead } = useRead();
 
-  const handleRelatedPress = useCallback((relatedId: string) => {
-    setReadIds((prev) => new Set(prev).add(relatedId));
-    router.push(`/news/${relatedId}` as never);
-  }, []);
+  // Opening an article marks it read (persists across screens/restarts).
+  useEffect(() => {
+    if (news?.id) markRead(news.id);
+  }, [news?.id, markRead]);
+
+  const handleRelatedPress = useCallback(
+    (relatedId: string) => {
+      markRead(relatedId);
+      router.push(`/news/${relatedId}` as never);
+    },
+    [markRead]
+  );
 
   if (!news) return <NotFound />;
 
@@ -297,7 +306,7 @@ export default function NewsDetailScreen() {
               <NewsCard
                 key={item.id}
                 item={item}
-                isRead={readIds.has(item.id)}
+                isRead={isRead(item.id)}
                 isBookmarked={isBookmarked(item.id)}
                 onPress={handleRelatedPress}
                 onBookmark={handleBookmark}

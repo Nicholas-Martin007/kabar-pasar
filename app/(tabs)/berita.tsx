@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useRead } from '@/src/context/ReadContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useIndex, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
@@ -32,9 +33,9 @@ export default function BeritaScreen() {
   const { data: allNews, refetch: refetchNews } = useNewsFeed();
   const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
+  const { isRead, markRead } = useRead();
   const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
   const [refreshing,     setRefreshing]    = useState(false);
-  const [readIds,        setReadIds]       = useState(new Set<string>());
 
   const filtered = React.useMemo(
     () =>
@@ -62,9 +63,9 @@ export default function BeritaScreen() {
     useReactions(reactionItems);
 
   const handlePress = useCallback((id: string) => {
-    setReadIds((prev) => new Set(prev).add(id));
+    markRead(id);
     router.push(`/news/${id}` as never);
-  }, []);
+  }, [markRead]);
 
   // Live IHSG snapshot for the header (mock fallback when offline).
   const market = React.useMemo(
@@ -90,7 +91,7 @@ export default function BeritaScreen() {
     ({ item }: { item: News }) => (
       <NewsCard
         item={item}
-        isRead={readIds.has(item.id)}
+        isRead={isRead(item.id)}
         isBookmarked={isBookmarked(item.id)}
         onPress={handlePress}
         onBookmark={handleBookmark}
@@ -98,7 +99,7 @@ export default function BeritaScreen() {
         reactionLoading={reactionsLoading}
       />
     ),
-    [readIds, isBookmarked, handlePress, handleBookmark, reactionMap, reactionsLoading]
+    [isRead, isBookmarked, handlePress, handleBookmark, reactionMap, reactionsLoading]
   );
 
   const renderHeader = useCallback(

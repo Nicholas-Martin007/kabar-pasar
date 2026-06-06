@@ -18,6 +18,7 @@ import { NewsCard } from '@/components/news-card';
 import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useRead } from '@/src/context/ReadContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useChart, useQuote, useReactions } from '@/src/hooks/useMarket';
@@ -113,9 +114,9 @@ export default function StockDetailScreen() {
   const inWatchlist = ticker ? contains(ticker) : false;
 
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
+  const { isRead, markRead } = useRead();
   const [activeRange, setActiveRange] = useState<TimeRange>('1W');
   const [chartStyle, setChartStyle]   = useState<'line' | 'candle'>('line');
-  const [readIds,       setReadIds]   = useState(new Set<string>());
 
   // Live market data (falls back to mock stock values when unavailable).
   const { data: quote } = useQuote(ticker);
@@ -123,9 +124,9 @@ export default function StockDetailScreen() {
   const { data: allNews } = useNewsFeed({ limit: 200 });
 
   const handleNewsPress = useCallback((id: string) => {
-    setReadIds((prev) => new Set(prev).add(id));
+    markRead(id);
     router.push(`/news/${id}` as never);
-  }, []);
+  }, [markRead]);
 
   // Pin/unpin this stock to the iOS lock screen via a Live Activity.
   // Uses live quote data when available; no-ops until a native dev build exists.
@@ -416,7 +417,7 @@ export default function StockDetailScreen() {
               <NewsCard
                 key={item.id}
                 item={item}
-                isRead={readIds.has(item.id)}
+                isRead={isRead(item.id)}
                 isBookmarked={isBookmarked(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}

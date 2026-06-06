@@ -18,6 +18,7 @@ import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useRead } from '@/src/context/ReadContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
   Border,
@@ -48,12 +49,12 @@ function formatIHSG(value: number): string {
 export default function HomeScreen() {
   const { items: watchlistItems } = useWatchlist();
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
+  const { isRead, markRead } = useRead();
   const { data: allNews, refetch } = useNewsFeed();
   const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const [greeting,      setGreeting]      = useState(getGreeting);
   const [marketStatus,  setMarketStatus]  = useState(getMarketStatus);
   const [refreshing,    setRefreshing]    = useState(false);
-  const [readIds,       setReadIds]       = useState(new Set<string>());
 
   // Top 3 high-importance items, newest first.
   const topNews: News[] = React.useMemo(
@@ -119,9 +120,9 @@ export default function HomeScreen() {
   }, [refetch, refetchIndex, refetchQuotes]);
 
   const handleNewsPress = useCallback((id: string) => {
-    setReadIds((prev) => new Set(prev).add(id));
+    markRead(id);
     router.push(`/news/${id}` as never);
-  }, []);
+  }, [markRead]);
 
   const handleStockPress = useCallback((ticker: string) => {
     router.push(`/stock/${ticker}` as never);
@@ -199,7 +200,7 @@ export default function HomeScreen() {
               <NewsCard
                 key={item.id}
                 item={item}
-                isRead={readIds.has(item.id)}
+                isRead={isRead(item.id)}
                 isBookmarked={isBookmarked(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}
