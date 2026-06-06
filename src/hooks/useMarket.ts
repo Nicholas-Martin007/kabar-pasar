@@ -6,6 +6,8 @@ import {
   fetchIndex,
   fetchQuote,
   fetchReaction,
+  fetchReactions,
+  ReactionItem,
 } from '@/src/services/api';
 
 // Quotes refresh often during market hours; keep cache short.
@@ -53,5 +55,25 @@ export function useReaction(ticker?: string, atISO?: string, windowMin = 60) {
     enabled: !!ticker && !!atISO,
     staleTime: 5 * 60_000,
     retry: 1,
+  });
+}
+
+/**
+ * Batched reactions for a list of news items (one request). Returns a Map keyed
+ * by each item's `key` for easy per-card lookup. Cache long — historical data.
+ */
+export function useReactions(items: ReactionItem[]) {
+  const keySig = items.map((i) => `${i.key}:${i.ticker}:${i.at}`).join('|');
+  return useQuery({
+    queryKey: ['market', 'reactions', keySig],
+    queryFn: () => fetchReactions(items),
+    enabled: items.length > 0,
+    staleTime: 5 * 60_000,
+    retry: 1,
+    select: (list) => {
+      const map = new Map<string, (typeof list)[number]>();
+      for (const r of list) if (r.key) map.set(r.key, r);
+      return map;
+    },
   });
 }

@@ -7,8 +7,13 @@ import { router } from 'expo-router';
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
 import { useNewsFeed } from '@/src/hooks/useNews';
+import { useReactions } from '@/src/hooks/useMarket';
+import { ReactionItem } from '@/src/services/api';
 import { Colors, FontSize, Layout } from '@/src/theme';
 import { FeedFilter, News, NewsCategory } from '@/src/types/news';
+
+// Cap how many cards request a reaction (keeps the batch polite to Yahoo).
+const MAX_REACTIONS = 40;
 
 const MARKET = {
   index:  'IHSG',
@@ -44,6 +49,17 @@ export default function BeritaScreen() {
     [allNews, activeFilter]
   );
 
+  // Batch one reaction request for the visible cards that have a ticker.
+  const reactionItems: ReactionItem[] = React.useMemo(
+    () =>
+      filtered
+        .filter((n) => n.tickers.length > 0)
+        .slice(0, MAX_REACTIONS)
+        .map((n) => ({ key: n.id, ticker: n.tickers[0], at: n.publishedAt })),
+    [filtered]
+  );
+  const { data: reactionMap } = useReactions(reactionItems);
+
   const handlePress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
     router.push(`/news/${id}` as never);
@@ -66,9 +82,10 @@ export default function BeritaScreen() {
         isBookmarked={bookmarkedIds.has(item.id)}
         onPress={handlePress}
         onBookmark={handleBookmark}
+        reaction={reactionMap?.get(item.id)}
       />
     ),
-    [readIds, bookmarkedIds, handlePress, handleBookmark]
+    [readIds, bookmarkedIds, handlePress, handleBookmark, reactionMap]
   );
 
   const renderHeader = useCallback(

@@ -1,14 +1,17 @@
 """Market data API — live quotes & charts from Yahoo Finance (IDX .JK / ^JKSE)."""
 
 import logging
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from services.market_service import (
     IHSG_SYMBOL,
     RANGE_INTERVAL,
     fetch_quote,
     fetch_reaction,
+    fetch_reactions,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,4 +73,26 @@ async def market_reaction(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.warning("market.reaction_failed ticker=%s error=%s", ticker, exc)
+        raise HTTPException(status_code=502, detail=f"Market data error: {exc}")
+
+
+class ReactionItem(BaseModel):
+    key: Optional[str] = None  # echoed back so the caller can map rows
+    ticker: str
+    at: str
+    window: int = Field(60, ge=5, le=480)
+
+
+class ReactionBatchRequest(BaseModel):
+    items: List[ReactionItem] = Field(..., max_length=60)
+
+
+@router.post("/reactions")
+async def market_reactions(body: ReactionBatchRequest) -> dict:
+    """Batched reaction lookup — one request for many feed cards."""
+    try:
+        results = await fetch_reactions([i.model_dump() for i in body.items])
+        return {"reactions": results}
+    except Exception as exc:
+        logger.warning("market.reactions_failed error=%s", exc)
         raise HTTPException(status_code=502, detail=f"Market data error: {exc}")

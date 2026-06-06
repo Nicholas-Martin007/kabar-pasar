@@ -15,6 +15,7 @@ import {
   Radius,
   withAlpha13,
 } from '@/src/theme';
+import { Reaction } from '@/src/services/api';
 import { News, NewsImportance, NewsSource } from '@/src/types/news';
 import { timeAgo } from '@/utils/time';
 
@@ -24,6 +25,8 @@ interface Props {
   isBookmarked: boolean;
   onPress: (id: string) => void;
   onBookmark: (id: string) => void;
+  /** Optional post-news price reaction badge (news -> price linkage). */
+  reaction?: Reaction | null;
 }
 
 const IMPORTANCE_COLOR: Record<NewsImportance, string> = {
@@ -47,9 +50,20 @@ const SOURCE_COLOR: Record<NewsSource, string> = {
   'IR Emiten':        Colors.source['IR Emiten'],
 };
 
-export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark }: Props) => {
+export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark, reaction }: Props) => {
   const stripeColor = IMPORTANCE_COLOR[item.importance];
   const sourceColor = SOURCE_COLOR[item.source];
+
+  const reactionPct =
+    reaction?.available && reaction.reactionPercent != null
+      ? reaction.reactionPercent
+      : null;
+  const reactionColor =
+    reactionPct == null
+      ? Colors.text.muted
+      : reactionPct >= 0
+        ? Colors.sentiment.positive
+        : Colors.sentiment.negative;
 
   const handlePress    = useCallback(() => onPress(item.id),    [item.id, onPress]);
   const handleBookmark = useCallback(() => onBookmark(item.id), [item.id, onBookmark]);
@@ -99,22 +113,41 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
           </View>
         </View>
 
-        {/* Row 4: tickers + bookmark */}
+        {/* Row 4: tickers + reaction + bookmark */}
         <View style={styles.bottomRow}>
-          {item.tickers.length > 0 ? (
-            <View style={styles.tickerGroup}>
-              {item.tickers.slice(0, 2).map((t) => (
-                <View key={t} style={styles.tickerChip}>
-                  <Text style={styles.tickerText}>{t}</Text>
-                </View>
-              ))}
-              {item.tickers.length > 2 && (
-                <Text style={styles.tickerOverflow}>+{item.tickers.length - 2}</Text>
-              )}
-            </View>
-          ) : (
-            <View />
-          )}
+          <View style={styles.bottomLeft}>
+            {item.tickers.length > 0 && (
+              <View style={styles.tickerGroup}>
+                {item.tickers.slice(0, 2).map((t) => (
+                  <View key={t} style={styles.tickerChip}>
+                    <Text style={styles.tickerText}>{t}</Text>
+                  </View>
+                ))}
+                {item.tickers.length > 2 && (
+                  <Text style={styles.tickerOverflow}>+{item.tickers.length - 2}</Text>
+                )}
+              </View>
+            )}
+
+            {reactionPct != null && (
+              <View
+                style={[
+                  styles.reactionBadge,
+                  { backgroundColor: withAlpha13(reactionColor) },
+                ]}
+              >
+                <Ionicons
+                  name={reactionPct >= 0 ? 'trending-up' : 'trending-down'}
+                  size={10}
+                  color={reactionColor}
+                />
+                <Text style={[styles.reactionText, { color: reactionColor }]}>
+                  {reactionPct >= 0 ? '+' : ''}
+                  {reactionPct.toFixed(1).replace('.', ',')}%
+                </Text>
+              </View>
+            )}
+          </View>
 
           <TouchableOpacity
             onPress={handleBookmark}
@@ -241,10 +274,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 2,
   },
+  bottomLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Layout.rowGap,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
   tickerGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Layout.rowGap,
+  },
+  reactionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: Layout.chipPaddingX,
+    paddingVertical: Layout.chipPaddingY,
+    borderRadius: Radius.chip,
+  },
+  reactionText: {
+    fontSize: FontSize.small,
+    fontWeight: FontWeight.bold,
+    fontFamily: FontFamily.mono ?? undefined,
   },
   tickerChip: {
     backgroundColor: Colors.border.default,

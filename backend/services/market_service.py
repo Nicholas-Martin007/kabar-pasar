@@ -126,38 +126,22 @@ async def _fetch_series(
     return [(t, c) for t, c in zip(stamps, closes) if c is not None]
 
 
-async def fetch_reaction(
-    ticker: str, at_iso: str, window_min: int = 60
-) -> dict:
-    """
-    Measure how a ticker's price reacted in the window after a news timestamp.
-
-    Picks the first intraday bar at/after the news time as the baseline, then the
-    first bar ~window_min later. Granularity adapts to how old the news is
-    (intraday for recent, daily for old). Returns available=False when there
-    isn't enough price history (e.g. news older than intraday retention).
-    """
-    at = _parse_iso(at_iso)
-    at_ts = at.timestamp()
-    age_days = (datetime.now(timezone.utc).timestamp() - at_ts) / 86400
-
+def _pick_range_interval(age_days: float) -> Tuple[str, str]:
+    """Coarser granularity for older news (and longer Yahoo retention)."""
     if age_days <= 2:
-        range_, interval = "5d", "15m"
-    elif age_days <= 25:
-        range_, interval = "1mo", "60m"
-    else:
-        range_, interval = "3mo", "1d"
+        return "5d", "15m"
+    if age_days <= 25:
+        return "1mo", "60m"
+    return "3mo", "1d"
 
-    symbol = to_yahoo_symbol(ticker)
-    series = await _fetch_series(symbol, range_, interval)
 
+def _reaction_from_series(
+    series: List[Tuple[int, float]], at_ts: float, window_min: int
+) -> dict:
+    """Compute the post-news move from an already-fetched price series."""
     base = next(((t, c) for t, c in series if t >= at_ts), None)
     if base is None:
-        return {
-            "available": False,
-            "ticker": ticker.strip().upper(),
-            "reason": "no price data at/after the news time",
-        }
+        return {"available": False, "reason": "no price data at/after the news time"}
 
     target_ts = base[0] + window_min * 60
     after = next(((t, c) for t, c in series if t >= target_ts), None)
@@ -166,16 +150,89 @@ async def fetch_reaction(
     used_window = max(1, round((after[0] - base[0]) / 60))
 
     base_price, after_price = base[1], after[1]
-    pct = (
-        (after_price - base_price) / base_price * 100 if base_price else None
-    )
+    pct = (after_price - base_price) / base_price * 100 if base_price else None
 
     return {
         "available": pct is not None,
-        "ticker": ticker.strip().upper(),
         "basePrice": _round(base_price),
         "afterPrice": _round(after_price),
         "reactionPercent": _round(pct),
         "windowMinutes": used_window,
-        "interval": interval,
     }
+
+
+async def fetch_reaction(
+    ticker: str, at_iso: str, window_min: int = 60
+) -> dict:
+    """
+    Measure how a ticker's price reacted in the window after a news timestamp.
+    Granularity adapts to how old the news is. available=False when there isn't
+    enough price history (e.g. news older than intraday retention).
+    """
+    at_ts = _parse_iso(at_iso).timestamp()
+    age_days = (datetime.now(timezone.utc).timestamp() - at_ts) / 86400
+    range_, interval = _pick_range_interval(age_days)
+    series = await _fetch_series(to_yahoo_symbol(ticker), range_, interval)
+    result = _reaction_from_series(series, at_ts, window_min)
+    result["ticker"] = ticker.strip().upper()
+    result["interval"] = interval
+    return result
+
+
+async def fetch_reactions(items: List[dict]) -> List[dict]:
+    """
+    Batched reaction lookup. Groups items by (symbol, range, interval) and
+    fetches each unique series only ONCE — so a feed of 50 cards costs a handful
+    of Yahoo calls, not 50. Each item may carry a "key" that's echoed back so the
+    caller can map results to rows.
+    """
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    # Parse every item up front; remember which group each belongs to.
+    parsed: List[Optional[dict]] = []
+    groups: Dict[Tuple[str, str, str], None] = {}
+    for it in items:
+        try:
+            at_ts = _parse_iso(it["at"]).timestamp()
+        except Exception:
+            parsed.append(None)
+            continue
+        symbol = to_yahoo_symbol(it.get("ticker", ""))
+        rng, iv = _pick_range_interval((now_ts - at_ts) / 86400)
+        groups[(symbol, rng, iv)] = None
+        parsed.append(
+            {
+                "key": it.get("key"),
+                "ticker": (it.get("ticker") or "").strip().upper(),
+                "symbol": symbol,
+                "at_ts": at_ts,
+                "window": int(it.get("window", 60)),
+                "ri": (rng, iv),
+            }
+        )
+
+    # Fetch each unique series once.
+    series_by_group: Dict[Tuple[str, str, str], List[Tuple[int, float]]] = {}
+    for key in groups:
+        symbol, rng, iv = key
+        try:
+            series_by_group[key] = await _fetch_series(symbol, rng, iv)
+        except Exception:
+            series_by_group[key] = []
+
+    # Build aligned results.
+    results: List[dict] = []
+    for raw, p in zip(items, parsed):
+        if p is None:
+            results.append(
+                {"key": raw.get("key"), "available": False, "reason": "invalid item"}
+            )
+            continue
+        rng, iv = p["ri"]
+        series = series_by_group.get((p["symbol"], rng, iv), [])
+        r = _reaction_from_series(series, p["at_ts"], p["window"])
+        r["key"] = p["key"]
+        r["ticker"] = p["ticker"]
+        r["interval"] = iv
+        results.append(r)
+    return results

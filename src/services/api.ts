@@ -111,7 +111,9 @@ export async function fetchChart(
 
 export interface Reaction {
   available: boolean;
-  ticker: string;
+  ticker?: string;
+  /** Echoed back in batch responses so callers can map to rows (e.g. news id). */
+  key?: string;
   basePrice?: number | null;
   afterPrice?: number | null;
   reactionPercent?: number | null;
@@ -130,6 +132,25 @@ export async function fetchReaction(
     `/market/reaction/${encodeURIComponent(ticker)}` +
       `?at=${encodeURIComponent(atISO)}&window=${windowMin}`
   );
+}
+
+export interface ReactionItem {
+  key?: string;
+  ticker: string;
+  at: string;
+  window?: number;
+}
+
+/** Batched reaction lookup — one request for many feed cards. */
+export async function fetchReactions(
+  items: ReactionItem[]
+): Promise<Reaction[]> {
+  const res = await getJSON<{ reactions: Reaction[] }>('/market/reactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+  return res.reactions;
 }
 
 /** Bundled mock feed — used as an offline/dev fallback (see useNews hooks). */
