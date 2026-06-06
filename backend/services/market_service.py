@@ -93,6 +93,13 @@ async def fetch_quote(
         "currency": meta.get("currency"),
         "marketState": meta.get("marketState"),
         "sparkline": [_round(c) for c in closes],
+        # Fundamentals available free in chart meta (no auth required).
+        "dayLow": _round(meta.get("regularMarketDayLow")),
+        "dayHigh": _round(meta.get("regularMarketDayHigh")),
+        "week52Low": _round(meta.get("fiftyTwoWeekLow")),
+        "week52High": _round(meta.get("fiftyTwoWeekHigh")),
+        "volume": meta.get("regularMarketVolume"),
+        "longName": meta.get("longName") or meta.get("shortName"),
     }
     _cache[cache_key] = (time.time(), quote)
     return quote

@@ -79,6 +79,13 @@ export interface Quote {
   currency?: string | null;
   marketState?: string | null;
   sparkline: (number | null)[];
+  // Fundamentals (from Yahoo chart meta — single-quote endpoint only).
+  dayLow?: number | null;
+  dayHigh?: number | null;
+  week52Low?: number | null;
+  week52High?: number | null;
+  volume?: number | null;
+  longName?: string | null;
 }
 
 export interface ChartResponse {

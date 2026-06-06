@@ -18,8 +18,9 @@ import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
-import { useChart, useQuote } from '@/src/hooks/useMarket';
+import { useChart, useQuote, useReactions } from '@/src/hooks/useMarket';
 import { useStockLiveActivity } from '@/src/hooks/useStockLiveActivity';
+import { ReactionItem } from '@/src/services/api';
 import {
   Border,
   Colors,
@@ -52,6 +53,19 @@ function formatIDR(price: number): string {
 
 function formatPct(pct: number): string {
   return (pct >= 0 ? '+' : '') + pct.toFixed(2).replace('.', ',') + '%';
+}
+
+function formatVolume(v: number): string {
+  if (v >= 1e12) return (v / 1e12).toFixed(1).replace('.', ',') + ' T';
+  if (v >= 1e9) return (v / 1e9).toFixed(1).replace('.', ',') + ' M';
+  if (v >= 1e6) return (v / 1e6).toFixed(1).replace('.', ',') + ' jt';
+  if (v >= 1e3) return (v / 1e3).toFixed(1).replace('.', ',') + ' rb';
+  return String(v);
+}
+
+function formatRange(lo?: number | null, hi?: number | null): string {
+  if (lo == null || hi == null) return '—';
+  return `${formatIDR(lo)} – ${formatIDR(hi)}`;
 }
 
 // ── Not-Found ─────────────────────────────────────────────────────────────────
@@ -146,6 +160,32 @@ export default function StockDetailScreen() {
     );
   }, [live, stock, quote, allNews]);
 
+  // Related news (live) — computed before the early return so the reaction
+  // hook below is always called in the same order.
+  const relatedNews: News[] = React.useMemo(
+    () =>
+      !stock
+        ? []
+        : allNews
+            .filter((n) => n.tickers.includes(stock.ticker))
+            .sort(
+              (a, b) =>
+                new Date(b.publishedAt).getTime() -
+                new Date(a.publishedAt).getTime()
+            ),
+    [allNews, stock]
+  );
+
+  const relatedReactionItems: ReactionItem[] = React.useMemo(
+    () =>
+      relatedNews
+        .slice(0, 20)
+        .map((n) => ({ key: n.id, ticker: n.tickers[0], at: n.publishedAt })),
+    [relatedNews]
+  );
+  const { data: relatedReactionMap, isLoading: relatedReactionsLoading } =
+    useReactions(relatedReactionItems);
+
   if (!stock) return <NotFound ticker={ticker ?? '—'} />;
 
   // Prefer live data; fall back to the bundled mock stock.
@@ -164,9 +204,17 @@ export default function StockDetailScreen() {
   // Until then, show a disabled "coming soon" placeholder.
   const canPin = live.isSupported();
 
-  const relatedNews: News[] = allNews
-    .filter((n) => n.tickers.includes(stock.ticker))
-    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+  // Live fundamentals where Yahoo provides them; mock fallback for the rest.
+  const volumeText =
+    quote?.volume != null ? formatVolume(quote.volume) : stats?.volume ?? '—';
+  const dayRangeText = formatRange(
+    quote?.dayLow ?? stats?.dayLow,
+    quote?.dayHigh ?? stats?.dayHigh
+  );
+  const week52Text = formatRange(
+    quote?.week52Low ?? stats?.week52Low,
+    quote?.week52High ?? stats?.week52High
+  );
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -299,29 +347,23 @@ export default function StockDetailScreen() {
           </View>
         </View>
 
-        {/* ── Key stats ───────────────────────────────────────────────── */}
-        {stats && (
+        {/* ── Key stats (live where free; mock fallback otherwise) ────── */}
+        {(stats || quote?.available) && (
           <View style={styles.statsSection}>
             <Text style={styles.sectionLabel}>Statistik Saham</Text>
             <View style={styles.statsGrid}>
-              <StatCell label="Market Cap"      value={stats.marketCap} />
-              <StatCell label="Volume"          value={stats.volume} />
-              <StatCell
-                label="Day Range"
-                value={`${formatIDR(stats.dayLow)} – ${formatIDR(stats.dayHigh)}`}
-              />
-              <StatCell
-                label="52-Week Range"
-                value={`${formatIDR(stats.week52Low)} – ${formatIDR(stats.week52High)}`}
-              />
+              <StatCell label="Market Cap"   value={stats?.marketCap ?? '—'} />
+              <StatCell label="Volume"       value={volumeText} />
+              <StatCell label="Day Range"    value={dayRangeText} />
+              <StatCell label="52-Week Range" value={week52Text} />
               <StatCell
                 label="PER"
-                value={stats.per !== null ? `${stats.per.toFixed(1)}x` : '—'}
+                value={stats?.per != null ? `${stats.per.toFixed(1)}x` : '—'}
               />
               <StatCell
                 label="Div. Yield"
                 value={
-                  stats.dividendYield !== null
+                  stats?.dividendYield != null
                     ? `${stats.dividendYield.toFixed(1)}%`
                     : '—'
                 }
@@ -346,6 +388,8 @@ export default function StockDetailScreen() {
                 isBookmarked={bookmarkedIds.has(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}
+                reaction={relatedReactionMap?.get(item.id)}
+                reactionLoading={relatedReactionsLoading}
               />
             ))
           )}
