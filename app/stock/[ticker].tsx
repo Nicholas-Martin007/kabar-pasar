@@ -14,10 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LineChart } from '@/components/line-chart';
 import { NewsCard } from '@/components/news-card';
-import { mockNews } from '@/src/data/mockNews';
 import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
 import { useWatchlist } from '@/src/context/WatchlistContext';
+import { useNewsFeed } from '@/src/hooks/useNews';
 import { useChart, useQuote } from '@/src/hooks/useMarket';
 import { useStockLiveActivity } from '@/src/hooks/useStockLiveActivity';
 import {
@@ -103,6 +103,7 @@ export default function StockDetailScreen() {
   // Live market data (falls back to mock stock values when unavailable).
   const { data: quote } = useQuote(ticker);
   const { data: chart } = useChart(ticker, activeRange);
+  const { data: allNews } = useNewsFeed({ limit: 200 });
 
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
@@ -127,7 +128,7 @@ export default function StockDetailScreen() {
       return;
     }
     const headline =
-      mockNews
+      allNews
         .filter((n) => n.tickers.includes(stock.ticker))
         .sort(
           (a, b) =>
@@ -143,7 +144,7 @@ export default function StockDetailScreen() {
         headline,
       }
     );
-  }, [live, stock, quote]);
+  }, [live, stock, quote, allNews]);
 
   if (!stock) return <NotFound ticker={ticker ?? '—'} />;
 
@@ -163,7 +164,7 @@ export default function StockDetailScreen() {
   // Until then, show a disabled "coming soon" placeholder.
   const canPin = live.isSupported();
 
-  const relatedNews: News[] = mockNews
+  const relatedNews: News[] = allNews
     .filter((n) => n.tickers.includes(stock.ticker))
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 
