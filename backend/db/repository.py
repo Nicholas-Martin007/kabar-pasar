@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from models.news import News, NewsCategory, NewsImportance, NewsSource
 
-from .models import AISummaryRow, NewsRow
+from .models import AISummaryRow, NewsRow, TelegramSubscriber
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +140,54 @@ async def query_news(
 async def count_news(session: AsyncSession) -> int:
     from sqlalchemy import func
     return (await session.execute(select(func.count(NewsRow.id)))).scalar_one()
+
+
+# ── Telegram subscribers ──────────────────────────────────────────────────────
+
+async def ensure_subscriber(session: AsyncSession, chat_id: str) -> None:
+    if await session.get(TelegramSubscriber, chat_id) is None:
+        session.add(TelegramSubscriber(chat_id=chat_id, tickers=[]))
+        await session.commit()
+
+
+async def get_subscriber_tickers(session: AsyncSession, chat_id: str) -> List[str]:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    return list(sub.tickers or []) if sub else []
+
+
+async def add_subscriber_ticker(
+    session: AsyncSession, chat_id: str, ticker: str
+) -> List[str]:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(chat_id=chat_id, tickers=[])
+        session.add(sub)
+    tickers = list(sub.tickers or [])
+    if ticker not in tickers:
+        tickers.append(ticker)
+    sub.tickers = sorted(tickers)  # reassign so SQLAlchemy tracks the JSON change
+    await session.commit()
+    return sub.tickers
+
+
+async def remove_subscriber_ticker(
+    session: AsyncSession, chat_id: str, ticker: str
+) -> List[str]:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        return []
+    sub.tickers = [t for t in (sub.tickers or []) if t != ticker]
+    await session.commit()
+    return sub.tickers
+
+
+async def remove_subscriber(session: AsyncSession, chat_id: str) -> None:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is not None:
+        await session.delete(sub)
+        await session.commit()
+
+
+async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
+    rows = (await session.execute(select(TelegramSubscriber))).scalars().all()
+    return [{"chat_id": r.chat_id, "tickers": list(r.tickers or [])} for r in rows]

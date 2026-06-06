@@ -14,6 +14,7 @@ from db.repository import upsert_news_items
 from db.session import get_session
 from services.ai_summarizer import summarize_batch
 from services.rss_service import fetch_all_news
+from services.telegram_service import dispatch_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +41,16 @@ async def refresh_news_job() -> Dict[str, int]:
         to_summarise = new_items[:_AI_BATCH]
         stats = await summarize_batch(session, to_summarise)
 
+    # Push Telegram alerts for new watchlist-matching items (no-op if disabled).
+    alerts_sent = await dispatch_alerts(new_items)
+
     result = {
         "fetched":    fetched,
         "new":        len(new_items),
         "summarised": stats["summarised"],
         "skipped":    stats["skipped"],
         "errors":     stats["errors"],
+        "alerts":     alerts_sent,
     }
     logger.info(
         "scheduler.refresh.done fetched=%d new=%d summarised=%d errors=%d",

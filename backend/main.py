@@ -13,6 +13,7 @@ from db.session import init_db
 from routers import market as market_router
 from routers import news as news_router
 from services.scheduler import refresh_news_job, shutdown_scheduler, start_scheduler
+from services.telegram_service import poll_updates_loop
 
 load_dotenv()
 
@@ -30,11 +31,14 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     # Kick off an initial refresh in the background — don't block server startup
     asyncio.create_task(_initial_refresh())
+    # Telegram command poller (no-op if TELEGRAM_BOT_TOKEN unset)
+    telegram_task = asyncio.create_task(poll_updates_loop())
     logger.info("app.startup_complete")
     try:
         yield
     finally:
         # Shutdown
+        telegram_task.cancel()
         shutdown_scheduler()
         await db_dispose()
         logger.info("app.shutdown_complete")

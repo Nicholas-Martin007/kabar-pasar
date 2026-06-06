@@ -40,6 +40,17 @@ class NewsRow(Base):
     )
 
 
+class TelegramSubscriber(Base):
+    """A Telegram chat subscribed to watchlist news alerts."""
+
+    __tablename__ = "telegram_subscriber"
+
+    chat_id:    Mapped[str]      = mapped_column(String(32), primary_key=True)
+    tickers:    Mapped[List[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class AISummaryRow(Base):
     __tablename__ = "ai_summary"
 
