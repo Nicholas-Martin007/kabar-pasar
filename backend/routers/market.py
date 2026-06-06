@@ -8,6 +8,7 @@ from services.market_service import (
     IHSG_SYMBOL,
     RANGE_INTERVAL,
     fetch_quote,
+    fetch_reaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,4 +54,20 @@ async def market_chart(
         }
     except Exception as exc:
         logger.warning("market.chart_failed ticker=%s error=%s", ticker, exc)
+        raise HTTPException(status_code=502, detail=f"Market data error: {exc}")
+
+
+@router.get("/reaction/{ticker}")
+async def market_reaction(
+    ticker: str,
+    at: str = Query(..., description="News timestamp, ISO 8601"),
+    window: int = Query(60, ge=5, le=480, description="Window in minutes"),
+) -> dict:
+    """How the stock moved in the window after a news item was published."""
+    try:
+        return await fetch_reaction(ticker, at, window_min=window)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning("market.reaction_failed ticker=%s error=%s", ticker, exc)
         raise HTTPException(status_code=502, detail=f"Market data error: {exc}")

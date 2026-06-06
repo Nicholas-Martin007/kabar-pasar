@@ -109,5 +109,28 @@ export async function fetchChart(
   );
 }
 
+export interface Reaction {
+  available: boolean;
+  ticker: string;
+  basePrice?: number | null;
+  afterPrice?: number | null;
+  reactionPercent?: number | null;
+  windowMinutes?: number;
+  interval?: string;
+  reason?: string;
+}
+
+/** How a stock's price reacted in the window after a news item was published. */
+export async function fetchReaction(
+  ticker: string,
+  atISO: string,
+  windowMin = 60
+): Promise<Reaction> {
+  return getJSON<Reaction>(
+    `/market/reaction/${encodeURIComponent(ticker)}` +
+      `?at=${encodeURIComponent(atISO)}&window=${windowMin}`
+  );
+}
+
 /** Bundled mock feed — used as an offline/dev fallback (see useNews hooks). */
 export const fallbackNews: News[] = mockNews;

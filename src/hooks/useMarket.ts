@@ -5,6 +5,7 @@ import {
   fetchChart,
   fetchIndex,
   fetchQuote,
+  fetchReaction,
 } from '@/src/services/api';
 
 // Quotes refresh often during market hours; keep cache short.
@@ -38,6 +39,19 @@ export function useChart(ticker?: string, range: ChartRange = '1M') {
     queryFn: () => fetchChart(ticker!, range),
     enabled: !!ticker,
     staleTime: STALE_MS,
+    retry: 1,
+  });
+}
+
+/**
+ * Price reaction after a news item. Historical once computed, so cache long.
+ */
+export function useReaction(ticker?: string, atISO?: string, windowMin = 60) {
+  return useQuery({
+    queryKey: ['market', 'reaction', ticker, atISO, windowMin],
+    queryFn: () => fetchReaction(ticker!, atISO!, windowMin),
+    enabled: !!ticker && !!atISO,
+    staleTime: 5 * 60_000,
     retry: 1,
   });
 }

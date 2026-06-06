@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NewsCard } from '@/components/news-card';
 import { useNewsFeed } from '@/src/hooks/useNews';
+import { useReaction } from '@/src/hooks/useMarket';
 import {
   Border,
   Colors,
@@ -47,6 +48,13 @@ const CATEGORY_LABEL: Record<NewsCategory, string> = {
   macro:            'Makroekonomi',
 };
 
+function formatWindow(min?: number): string {
+  if (!min) return 'beberapa saat';
+  if (min < 60) return `${min} menit`;
+  if (min < 1440) return `${Math.round(min / 60)} jam`;
+  return `${Math.round(min / 1440)} hari`;
+}
+
 // ── Not-Found fallback ───────────────────────────────────────────────────────
 
 function NotFound() {
@@ -73,6 +81,10 @@ export default function NewsDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: allNews } = useNewsFeed({ limit: 200 });
   const news = allNews.find((n) => n.id === id);
+
+  // Novelty: how the primary affected stock moved after this news broke.
+  const primaryTicker = news?.tickers[0];
+  const { data: reaction } = useReaction(primaryTicker, news?.publishedAt);
 
   const [readIds,       setReadIds]       = useState(new Set<string>());
   const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
@@ -208,6 +220,46 @@ export default function NewsDetailScreen() {
             </View>
           </View>
         </View>
+
+        {/* ── Market reaction (novelty: news ↔ price linkage) ─────────── */}
+        {reaction?.available &&
+          reaction.reactionPercent != null &&
+          primaryTicker && (
+            <View style={styles.reactionCard}>
+              <View style={styles.reactionHeader}>
+                <Ionicons
+                  name="pulse"
+                  size={13}
+                  color={Colors.text.secondary}
+                />
+                <Text style={styles.reactionTitle}>Reaksi Pasar</Text>
+              </View>
+              <View style={styles.reactionBody}>
+                <Text
+                  style={[
+                    styles.reactionPct,
+                    {
+                      color:
+                        reaction.reactionPercent >= 0
+                          ? Colors.sentiment.positive
+                          : Colors.sentiment.negative,
+                    },
+                  ]}
+                >
+                  {reaction.reactionPercent >= 0 ? '+' : ''}
+                  {reaction.reactionPercent.toFixed(2).replace('.', ',')}%
+                </Text>
+                <Text style={styles.reactionDesc}>
+                  {primaryTicker}{' '}
+                  {reaction.reactionPercent >= 0 ? 'bergerak naik' : 'bergerak turun'}{' '}
+                  dalam {formatWindow(reaction.windowMinutes)} setelah berita ini
+                </Text>
+              </View>
+              <Text style={styles.reactionSource}>
+                Berdasarkan data harga Yahoo Finance · indikatif
+              </Text>
+            </View>
+          )}
 
         {/* ── Affected tickers ────────────────────────────────────────── */}
         {news.tickers.length > 0 && (
@@ -445,6 +497,53 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     color: Colors.text.primary,
     lineHeight: LineHeight.normal,
+  },
+
+  // Market reaction card
+  reactionCard: {
+    marginHorizontal: Layout.screenPaddingX,
+    marginTop: 12,
+    backgroundColor: Colors.background.surface,
+    borderRadius: Radius.card,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
+    padding: Layout.cardPadding,
+    gap: 8,
+  },
+  reactionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  reactionTitle: {
+    fontSize: FontSize.caption,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.secondary,
+    letterSpacing: LetterSpacing.wider,
+    textTransform: 'uppercase',
+  },
+  reactionBody: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  reactionPct: {
+    fontSize: FontSize.title,
+    fontWeight: FontWeight.extrabold,
+    fontFamily: FontFamily.mono ?? undefined,
+    letterSpacing: LetterSpacing.tight,
+  },
+  reactionDesc: {
+    flex: 1,
+    minWidth: 140,
+    fontSize: FontSize.body,
+    color: Colors.text.secondary,
+    lineHeight: LineHeight.normal,
+  },
+  reactionSource: {
+    fontSize: FontSize.caption,
+    color: Colors.text.muted,
   },
 
   // Tickers
