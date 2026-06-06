@@ -353,7 +353,36 @@ async def get_subscriber_by_token(
     ).scalar_one_or_none()
     if row is None:
         return None
-    return {"chat_id": row.chat_id, "tickers": list(row.tickers or [])}
+    return {
+        "chat_id": row.chat_id,
+        "tickers": list(row.tickers or []),
+        "keywords": list(row.keywords or []),
+        "mute": list(row.mute or []),
+        "all_news": bool(row.all_news),
+    }
+
+
+async def set_prefs_by_token(
+    session: AsyncSession,
+    link_token: str,
+    all_news: Optional[bool] = None,
+    mute: Optional[List[str]] = None,
+) -> bool:
+    row = (
+        await session.execute(
+            select(TelegramSubscriber).where(
+                TelegramSubscriber.link_token == link_token
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return False
+    if all_news is not None:
+        row.all_news = bool(all_news)
+    if mute is not None:
+        row.mute = sorted({m.strip().lower() for m in mute if m.strip()})
+    await session.commit()
+    return True
 
 
 async def latest_news_for_tickers(

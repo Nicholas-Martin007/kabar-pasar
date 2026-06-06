@@ -5,21 +5,24 @@ summarises new items. Runs on a configurable interval (REFRESH_INTERVAL_MIN).
 
 import logging
 import os
+from datetime import timezone
 from typing import Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from db.repository import upsert_news_items
 from db.session import get_session
 from services.ai_summarizer import summarize_batch
 from services.rss_service import fetch_all_news
-from services.telegram_service import dispatch_alerts
+from services.telegram_service import dispatch_alerts, dispatch_digest
 
 logger = logging.getLogger(__name__)
 
 _AI_BATCH = int(os.getenv("AI_SUMMARY_BATCH", "10"))
 _REFRESH_MIN = int(os.getenv("REFRESH_INTERVAL_MIN", "5"))
+_DIGEST_HOUR_WIB = int(os.getenv("DIGEST_HOUR_WIB", "17"))  # 17:00 WIB default
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
@@ -59,6 +62,14 @@ async def refresh_news_job() -> Dict[str, int]:
     return result
 
 
+async def daily_digest_job() -> None:
+    try:
+        sent = await dispatch_digest()
+        logger.info("scheduler.digest.done sent=%d", sent)
+    except Exception as exc:
+        logger.warning("scheduler.digest_failed error=%s", exc)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Idempotent — safe to call once on FastAPI startup."""
     global _scheduler
@@ -75,8 +86,23 @@ def start_scheduler() -> AsyncIOScheduler:
         coalesce=True,      # collapse missed runs into one
         replace_existing=True,
     )
+    # Daily Telegram digest at DIGEST_HOUR_WIB (scheduled in UTC).
+    _scheduler.add_job(
+        daily_digest_job,
+        trigger=CronTrigger(
+            hour=(_DIGEST_HOUR_WIB - 7) % 24, minute=0, timezone=timezone.utc
+        ),
+        id="daily_digest",
+        name="Daily Telegram digest",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     _scheduler.start()
-    logger.info("scheduler.started interval_min=%d ai_batch=%d", _REFRESH_MIN, _AI_BATCH)
+    logger.info(
+        "scheduler.started interval_min=%d ai_batch=%d digest_hour_wib=%d",
+        _REFRESH_MIN, _AI_BATCH, _DIGEST_HOUR_WIB,
+    )
     return _scheduler
 
 

@@ -2,7 +2,7 @@
 
 import logging
 import secrets
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -61,3 +61,32 @@ async def telegram_status(
     async with get_session() as session:
         sub = await repo.get_subscriber_by_token(session, linkToken)
     return {"linked": sub is not None, "tickers": sub["tickers"] if sub else []}
+
+
+class PrefsRequest(BaseModel):
+    linkToken: str
+    all_news: Optional[bool] = None
+    mute: Optional[List[str]] = None
+
+
+@router.get("/prefs")
+async def telegram_get_prefs(
+    linkToken: str = Query(..., description="The app's stored link token"),
+) -> dict:
+    async with get_session() as session:
+        sub = await repo.get_subscriber_by_token(session, linkToken)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Tautan tidak ditemukan")
+    return sub
+
+
+@router.post("/prefs")
+async def telegram_set_prefs(body: PrefsRequest) -> dict:
+    async with get_session() as session:
+        ok = await repo.set_prefs_by_token(
+            session, body.linkToken, all_news=body.all_news, mute=body.mute
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Tautan tidak ditemukan")
+        sub = await repo.get_subscriber_by_token(session, body.linkToken)
+    return sub or {}

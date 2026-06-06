@@ -214,5 +214,27 @@ export async function telegramStatus(
   return getJSON(`/telegram/status?linkToken=${encodeURIComponent(linkToken)}`);
 }
 
+export interface TelegramPrefs {
+  tickers: string[];
+  keywords: string[];
+  mute: string[];
+  all_news: boolean;
+}
+
+export async function telegramGetPrefs(linkToken: string): Promise<TelegramPrefs> {
+  return getJSON(`/telegram/prefs?linkToken=${encodeURIComponent(linkToken)}`);
+}
+
+export async function telegramSetPrefs(
+  linkToken: string,
+  patch: { all_news?: boolean; mute?: string[] }
+): Promise<TelegramPrefs> {
+  return getJSON('/telegram/prefs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ linkToken, ...patch }),
+  });
+}
+
 /** Bundled mock feed — used as an offline/dev fallback (see useNews hooks). */
 export const fallbackNews: News[] = mockNews;

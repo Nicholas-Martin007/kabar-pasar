@@ -202,9 +202,20 @@ const CATEGORIES = Object.keys(CATEGORY_LABELS) as NewsCategory[];
 // ── Telegram link section ────────────────────────────────────────────────────
 
 function TelegramSection() {
-  const { isLinked, linking, error, link, unlink } = useTelegramLink();
+  const {
+    isLinked,
+    linking,
+    error,
+    link,
+    unlink,
+    prefs,
+    setAllNews,
+    addMute,
+    removeMute,
+  } = useTelegramLink();
   const [modal, setModal] = useState(false);
   const [code, setCode] = useState('');
+  const [muteInput, setMuteInput] = useState('');
 
   const handleLink = async () => {
     const ok = await link(code);
@@ -235,6 +246,53 @@ function TelegramSection() {
               <Ionicons name="checkmark-circle" size={IconSize.sm} color={Colors.brand.accent} />
             }
           />
+          <Toggle
+            label="Semua berita"
+            sublabel="Terima semua berita di Telegram"
+            value={prefs?.all_news ?? true}
+            onValueChange={setAllNews}
+          />
+          <View style={styles.tgMuteBlock}>
+            <Text style={styles.tgMuteLabel}>Topik dibisukan</Text>
+            <View style={styles.tgChips}>
+              {(prefs?.mute ?? []).map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={styles.tgChip}
+                  onPress={() => removeMute(m)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.tgChipText}>{m}</Text>
+                  <Ionicons name="close" size={12} color={Colors.text.muted} />
+                </TouchableOpacity>
+              ))}
+              {(prefs?.mute ?? []).length === 0 && (
+                <Text style={styles.tgMuteEmpty}>Tidak ada</Text>
+              )}
+            </View>
+            <View style={styles.tgAddRow}>
+              <TextInput
+                style={styles.tgMuteInput}
+                value={muteInput}
+                onChangeText={setMuteInput}
+                placeholder="cth: bola, kripto, bloomberg"
+                placeholderTextColor={Colors.text.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.tgAddBtn, !muteInput.trim() && styles.tgBtnDisabled]}
+                disabled={!muteInput.trim()}
+                onPress={() => {
+                  addMute(muteInput);
+                  setMuteInput('');
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.tgAddBtnText}>Bisukan</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           <Row label="Putuskan Telegram" danger last onPress={confirmUnlink} />
         </>
       ) : (
@@ -765,6 +823,74 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
     fontWeight: FontWeight.bold,
     color: Colors.background.screen,
+  },
+
+  // Mute manager (in linked Telegram section)
+  tgMuteBlock: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: Border.width,
+    borderTopColor: Colors.border.default,
+    gap: 8,
+  },
+  tgMuteLabel: {
+    fontSize: FontSize.caption,
+    color: Colors.text.muted,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: LetterSpacing.wide,
+  },
+  tgChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  tgChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.background.surfaceElevated,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+  },
+  tgChipText: {
+    fontSize: FontSize.small,
+    color: Colors.text.primary,
+  },
+  tgMuteEmpty: {
+    fontSize: FontSize.caption,
+    color: Colors.text.muted,
+  },
+  tgAddRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  tgMuteInput: {
+    flex: 1,
+    backgroundColor: Colors.background.surfaceElevated,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
+    borderRadius: Radius.component,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: FontSize.body,
+    color: Colors.text.primary,
+  },
+  tgAddBtn: {
+    backgroundColor: withAlpha13(Colors.brand.accent),
+    borderWidth: Border.width,
+    borderColor: Colors.brand.accent,
+    borderRadius: Radius.component,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  tgAddBtnText: {
+    fontSize: FontSize.body,
+    fontWeight: FontWeight.bold,
+    color: Colors.brand.accent,
   },
 
   // Footer

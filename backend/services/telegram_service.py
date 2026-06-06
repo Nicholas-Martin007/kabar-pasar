@@ -16,6 +16,7 @@ import logging
 import os
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -51,6 +52,7 @@ HELP = (
     "/unwatch · /unfollow — kebalikannya\n\n"
     "<b>Lainnya</b>\n"
     "/news 15 — tampilkan N berita terbaru (default 10)\n"
+    "/digest — ringkasan berita hari ini\n"
     "/list — lihat pengaturanmu\n"
     "/link — hubungkan watchlist dari app\n"
     "/stop — berhenti total\n\n"
@@ -132,6 +134,52 @@ def _matches(sub: dict, item: News) -> bool:
         return True
     keywords = sub.get("keywords") or []
     return any(kw in hay for kw in keywords) if keywords else False
+
+
+def _matches_dict(sub: dict, item: dict) -> bool:
+    """Dict-based variant of _matches for digest (news rows from the DB)."""
+    hay = f"{item['title']} {item['source']}".lower()
+    if sub.get("all_news"):
+        return not any(m in hay for m in (sub.get("mute") or []))
+    if set(sub.get("tickers") or []).intersection(item.get("tickers") or []):
+        return True
+    kws = sub.get("keywords") or []
+    return any(k in hay for k in kws) if kws else False
+
+
+def _format_digest(items: List[dict]) -> str:
+    wib = datetime.now(timezone.utc) + timedelta(hours=7)
+    parts = [f"📊 <b>Ringkasan Pasar — {wib.strftime('%d/%m/%Y')}</b>"]
+    for it in items:
+        tix = ", ".join(it.get("tickers") or [])
+        head = f"<b>{html.escape(tix)}</b> — " if tix else ""
+        block = (
+            f"\n• {head}{html.escape(it['title'])}"
+            f"\n  <i>{html.escape(it['source'])}</i>"
+        )
+        if it.get("url"):
+            block += f"\n  {it['url']}"
+        parts.append(block)
+    return "\n".join(parts)
+
+
+async def dispatch_digest(limit: int = 10) -> int:
+    """Send each subscriber a daily summary of news matching their prefs."""
+    if not _token():
+        return 0
+    async with get_session() as session:
+        subs = await repo.list_subscribers(session)
+        recent = await repo.latest_news(session, limit=80)
+    sent = 0
+    for sub in subs:
+        matched = [it for it in recent if _matches_dict(sub, it)][:limit]
+        if not matched:
+            continue
+        await send_message(sub["chat_id"], _format_digest(matched))
+        sent += 1
+    if sent:
+        logger.info("telegram.digest_sent count=%d", sent)
+    return sent
 
 
 async def dispatch_alerts(new_items: List[News]) -> int:
@@ -241,6 +289,15 @@ async def _handle_command(chat_id: str, text: str) -> None:
                         block += f"\n  {it['url']}"
                     parts.append(block)
                 reply = "\n".join(parts)
+        elif cmd == "digest":
+            sub = await repo.get_subscriber(session, chat_id) or {"all_news": True}
+            recent = await repo.latest_news(session, limit=80)
+            matched = [it for it in recent if _matches_dict(sub, it)][:10]
+            reply = (
+                _format_digest(matched)
+                if matched
+                else "Belum ada berita untuk ringkasan hari ini."
+            )
         elif cmd == "link":
             code = new_link_code(chat_id)
             reply = (

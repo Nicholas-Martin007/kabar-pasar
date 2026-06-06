@@ -10,7 +10,13 @@ import React, {
 } from 'react';
 
 import { useWatchlist } from '@/src/context/WatchlistContext';
-import { telegramLink, telegramSync } from '@/src/services/api';
+import {
+  TelegramPrefs,
+  telegramGetPrefs,
+  telegramLink,
+  telegramSetPrefs,
+  telegramSync,
+} from '@/src/services/api';
 
 const STORAGE_KEY = 'kabarpasar.telegram.linkToken.v1';
 
@@ -21,6 +27,11 @@ interface TelegramLinkValue {
   /** Exchange a bot /link code; on success the watchlist auto-syncs from now on. */
   link: (code: string) => Promise<boolean>;
   unlink: () => void;
+  // Bot preferences (when linked).
+  prefs: TelegramPrefs | null;
+  setAllNews: (on: boolean) => void;
+  addMute: (topic: string) => void;
+  removeMute: (topic: string) => void;
 }
 
 const TelegramLinkContext = createContext<TelegramLinkValue | null>(null);
@@ -33,6 +44,7 @@ export function TelegramLinkProvider({ children }: { children: React.ReactNode }
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<TelegramPrefs | null>(null);
   const hydrated = useRef(false);
 
   // Load persisted link token once.
@@ -55,6 +67,51 @@ export function TelegramLinkProvider({ children }: { children: React.ReactNode }
     telegramSync(linkToken, tickers).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickersSig, linkToken]);
+
+  // Load bot prefs when linked.
+  useEffect(() => {
+    if (!linkToken) {
+      setPrefs(null);
+      return;
+    }
+    telegramGetPrefs(linkToken)
+      .then(setPrefs)
+      .catch(() => {});
+  }, [linkToken]);
+
+  const setAllNews = useCallback(
+    (on: boolean) => {
+      if (!linkToken) return;
+      setPrefs((p) => (p ? { ...p, all_news: on } : p)); // optimistic
+      telegramSetPrefs(linkToken, { all_news: on })
+        .then(setPrefs)
+        .catch(() => {});
+    },
+    [linkToken]
+  );
+
+  const addMute = useCallback(
+    (topic: string) => {
+      const t = topic.trim().toLowerCase();
+      if (!linkToken || !t) return;
+      const next = Array.from(new Set([...(prefs?.mute ?? []), t]));
+      telegramSetPrefs(linkToken, { mute: next })
+        .then(setPrefs)
+        .catch(() => {});
+    },
+    [linkToken, prefs]
+  );
+
+  const removeMute = useCallback(
+    (topic: string) => {
+      if (!linkToken) return;
+      const next = (prefs?.mute ?? []).filter((m) => m !== topic);
+      telegramSetPrefs(linkToken, { mute: next })
+        .then(setPrefs)
+        .catch(() => {});
+    },
+    [linkToken, prefs]
+  );
 
   const link = useCallback(
     async (code: string): Promise<boolean> => {
@@ -85,8 +142,18 @@ export function TelegramLinkProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const value = useMemo(
-    () => ({ isLinked: !!linkToken, linking, error, link, unlink }),
-    [linkToken, linking, error, link, unlink]
+    () => ({
+      isLinked: !!linkToken,
+      linking,
+      error,
+      link,
+      unlink,
+      prefs,
+      setAllNews,
+      addMute,
+      removeMute,
+    }),
+    [linkToken, linking, error, link, unlink, prefs, setAllNews, addMute, removeMute]
   );
 
   return (
