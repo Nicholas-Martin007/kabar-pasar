@@ -61,6 +61,63 @@ TICKER_KEYWORDS: Dict[str, List[str]] = {
     "BNLI": ["bnli", "bank permata", "permata"],
 }
 
+# ── Broader IDX ticker universe (code-only detection) ────────────────────────
+# Curated set of actively-traded IDX tickers. Detection matches any bare
+# 4-uppercase-letter code in text that is in this set — so news mentioning a
+# code (e.g. "ADMR") gets tagged even without a name alias above.
+# Not exhaustive of all ~900 listings; covers the liquid universe. Common
+# English words that are also tickers (BANK, GOOD, MAIN, BEST, CARE, PORT, FIRE)
+# are intentionally omitted to avoid false positives — they match via aliases.
+VALID_TICKERS: Set[str] = {
+    # Banks
+    "BBCA", "BBRI", "BMRI", "BBNI", "BRIS", "BBTN", "BNGA", "BJBR", "BJTM",
+    "BNLI", "BBKP", "BDMN", "NISP", "MEGA", "BTPS", "BTPN", "PNBN", "SDRA",
+    "BBYB", "ARTO", "AGRO", "BBHI", "AMAR", "BABP", "BVIC", "BSIM", "BGTG",
+    "BNII", "MAYA", "PNBS",
+    # Telco / tower / tech
+    "TLKM", "ISAT", "EXCL", "FREN", "MTEL", "TBIG", "TOWR", "GOTO", "BUKA",
+    "EMTK", "MTDL", "DCII", "MLPT", "WIFI", "MCAS", "DMMX", "EDGE", "BELI",
+    "WIRG", "MSIN",
+    # Coal / energy
+    "ADRO", "ADMR", "AADI", "PTBA", "ITMG", "INDY", "HRUM", "BUMI", "BYAN",
+    "BSSR", "GEMS", "DSSA", "DOID", "PTRO", "RAJA", "ENRG", "ABMM", "TOBA",
+    # Oil & gas / chemicals
+    "MEDC", "PGAS", "ELSA", "AKRA", "ESSA", "BRPT", "TPIA", "INKP", "TKIM",
+    # Metals / mining
+    "ANTM", "INCO", "TINS", "MDKA", "NCKL", "MBMA", "BRMS", "PSAB", "DKFT",
+    "ZINC", "HRTA", "UNTR", "AMMN",
+    # Cement / materials
+    "SMGR", "INTP", "SMBR",
+    # Consumer / pharma / cigarettes
+    "UNVR", "ICBP", "INDF", "MYOR", "SIDO", "KLBF", "KAEF", "TSPC", "PYFA",
+    "SOHO", "PEHA", "HMSP", "GGRM", "WIIM", "ULTJ", "ROTI", "CLEO", "KINO",
+    "CMRY", "MLBI", "DLTA", "STTP", "CAMP", "AISA",
+    # Poultry / plantation
+    "CPIN", "JPFA", "AALI", "LSIP", "SIMP", "DSNG", "SGRO", "TAPG", "TBLA",
+    "ANJT", "BWPT", "SSMS",
+    # Retail
+    "AMRT", "MAPI", "ACES", "ERAA", "RALS", "LPPF", "MAPA", "MIDI", "CSAP",
+    # Auto / industrial
+    "ASII", "AUTO", "IMAS", "GJTL", "DRMA", "SMSM",
+    # Property / construction / infra
+    "BSDE", "CTRA", "PWON", "SMRA", "LPKR", "DMAS", "ASRI", "APLN", "PANI",
+    "KIJA", "SSIA", "ADHI", "WIKA", "WSKT", "PTPP", "WTON", "WSBP", "WEGE",
+    "JKON", "TOTL", "NRCA", "DGIK",
+    # Toll / transport / logistics
+    "JSMR", "META", "CMNP", "ASSA", "BIRD", "SMDR", "TMAS", "IPCC", "HAIS",
+    # Healthcare
+    "MIKA", "HEAL", "SILO", "SAME", "PRDA", "SRAJ",
+    # Media
+    "MNCN", "SCMA", "FILM", "VIVA", "TMPO",
+    # Finance / multifinance
+    "BFIN", "ADMF", "CFIN", "WOMF",
+    # Large / popular new listings
+    "BREN", "CUAN", "RATU",
+}
+VALID_TICKERS |= set(TICKER_KEYWORDS.keys())
+
+_CODE_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{4}(?![A-Za-z0-9])")
+
 # Pre-compile patterns for efficiency
 _PATTERNS: Dict[str, re.Pattern] = {}
 
@@ -82,8 +139,14 @@ def detect_tickers(text: str) -> List[str]:
     found: Set[str] = set()
     lower_text = text.lower()
 
+    # 1) Name/alias matching (case-insensitive) for the curated majors.
     for ticker, pattern in _PATTERNS.items():
         if pattern.search(lower_text):
             found.add(ticker)
+
+    # 2) Bare ticker-code matching for the broader IDX universe.
+    for code in _CODE_RE.findall(text):
+        if code in VALID_TICKERS:
+            found.add(code)
 
     return sorted(found)

@@ -8,20 +8,17 @@ import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
 import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
-import { useReactions } from '@/src/hooks/useMarket';
+import { useIndex, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { Colors, FontSize, Layout } from '@/src/theme';
 import { FeedFilter, News, NewsCategory } from '@/src/types/news';
+import { getMarketStatus } from '@/utils/market';
 
 // Cap how many cards request a reaction (keeps the batch polite to Yahoo).
 const MAX_REACTIONS = 40;
 
-const MARKET = {
-  index:  'IHSG',
-  value:  7_234.12,
-  change: 0.82,
-  isOpen: true,
-};
+// Fallback used only when the live IHSG quote is unavailable (offline).
+const IHSG_FALLBACK = { value: 7_234.12, change: 0.82 };
 
 const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsCategory[]> = {
   all:       ['corporate_action', 'earnings', 'market_news', 'regulatory', 'macro'],
@@ -33,6 +30,7 @@ const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsCategory[]> = {
 
 export default function BeritaScreen() {
   const { data: allNews, refetch: refetchNews } = useNewsFeed();
+  const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
   const [refreshing,     setRefreshing]    = useState(false);
@@ -68,14 +66,25 @@ export default function BeritaScreen() {
     router.push(`/news/${id}` as never);
   }, []);
 
+  // Live IHSG snapshot for the header (mock fallback when offline).
+  const market = React.useMemo(
+    () => ({
+      index: 'IHSG',
+      value: indexQuote?.price ?? IHSG_FALLBACK.value,
+      change: indexQuote?.changePercent ?? IHSG_FALLBACK.change,
+      isOpen: getMarketStatus().isOpen,
+    }),
+    [indexQuote]
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refetchNews(), refetchReactions()]);
+      await Promise.all([refetchNews(), refetchReactions(), refetchIndex()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetchNews, refetchReactions]);
+  }, [refetchNews, refetchReactions, refetchIndex]);
 
   const renderItem = useCallback(
     ({ item }: { item: News }) => (
@@ -98,10 +107,10 @@ export default function BeritaScreen() {
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
         onNotification={() => {}}
-        market={MARKET}
+        market={market}
       />
     ),
-    [activeFilter]
+    [activeFilter, market]
   );
 
   const renderEmpty = () => (
