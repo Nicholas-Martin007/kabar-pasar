@@ -6,12 +6,13 @@ from pydantic.alias_generators import to_camel
 
 
 class NewsSource(str, Enum):
-    CNBC_INDONESIA   = "CNBC Indonesia"
-    DETIK_FINANCE    = "Detik Finance"
-    KONTAN           = "Kontan"
-    BISNIS_INDONESIA = "Bisnis Indonesia"
-    BEI              = "BEI"
-    IR_EMITEN        = "IR Emiten"
+    CNBC_INDONESIA    = "CNBC Indonesia"
+    DETIK_FINANCE     = "Detik Finance"
+    KONTAN            = "Kontan"
+    BISNIS_INDONESIA  = "Bisnis Indonesia"
+    BLOOMBERG_TECHNOZ = "Bloomberg Technoz"
+    BEI               = "BEI"
+    IR_EMITEN         = "IR Emiten"
 
 
 class NewsImportance(str, Enum):

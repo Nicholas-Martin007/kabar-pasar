@@ -72,6 +72,7 @@ const SOURCE_COLOR: Record<NewsSource, string> = {
   'Detik Finance':    Colors.source['Detik Finance'],
   Kontan:             Colors.source.Kontan,
   'Bisnis Indonesia': Colors.source['Bisnis Indonesia'],
+  'Bloomberg Technoz': Colors.source['Bloomberg Technoz'],
   BEI:                Colors.source.BEI,
   'IR Emiten':        Colors.source['IR Emiten'],
 };

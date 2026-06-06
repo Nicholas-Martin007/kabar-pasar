@@ -15,6 +15,7 @@ from models.news import News
 from services.sources import (
     bei,
     bisnis_indonesia,
+    bloomberg_technoz,
     cnbc_indonesia,
     detik,
     kontan,
@@ -29,6 +30,7 @@ SOURCES: List[tuple[str, Callable[[], Coroutine]]] = [
     ("detik",            detik.fetch),
     ("kontan",           kontan.fetch),
     ("bisnis_indonesia", bisnis_indonesia.fetch),
+    ("bloomberg_technoz", bloomberg_technoz.fetch),
 ]
 
 

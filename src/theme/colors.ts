@@ -30,6 +30,7 @@ const P = {
   red400:    '#FF5252', // 5.7:1 — CNBC Indonesia, Detik Finance
   sky400:    '#3B9ED6', // 6.1:1 — Kontan
   indigo400: '#5B8EF5', // 5.8:1 — Bisnis Indonesia
+  amber400:  '#F5A623', // ~9.6:1 — Bloomberg Technoz
 } as const;
 
 export const Colors = {
@@ -65,6 +66,7 @@ export const Colors = {
     'Detik Finance':    P.red400,
     Kontan:             P.sky400,
     'Bisnis Indonesia': P.indigo400,
+    'Bloomberg Technoz': P.amber400, // ~9.6:1 ✓
     BEI:                P.teal400,   // 8.5:1 ✓
     'IR Emiten':        P.slate300,  // 6.3:1 ✓ — neutral for corporate IR
   },

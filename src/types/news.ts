@@ -3,6 +3,7 @@ export type NewsSource =
   | 'Detik Finance'
   | 'Kontan'
   | 'Bisnis Indonesia'
+  | 'Bloomberg Technoz'
   | 'BEI'
   | 'IR Emiten';
 
