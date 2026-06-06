@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   Dimensions,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +19,7 @@ import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import { useChart, useQuote } from '@/src/hooks/useMarket';
+import { useStockLiveActivity } from '@/src/hooks/useStockLiveActivity';
 import {
   Border,
   Colors,
@@ -88,6 +90,7 @@ function StatCell({ label, value }: { label: string; value: string }) {
 export default function StockDetailScreen() {
   const { ticker } = useLocalSearchParams<{ ticker: string }>();
   const { contains, toggle } = useWatchlist();
+  const live = useStockLiveActivity();
 
   const stock    = mockStocks.find((s) => s.ticker === ticker);
   const stats    = ticker ? mockStockStats[ticker] : undefined;
@@ -114,6 +117,33 @@ export default function StockDetailScreen() {
       return next;
     });
   }, []);
+
+  // Pin/unpin this stock to the iOS lock screen via a Live Activity.
+  // Uses live quote data when available; no-ops until a native dev build exists.
+  const handleTogglePin = useCallback(() => {
+    if (!stock) return;
+    if (live.isActive) {
+      live.end();
+      return;
+    }
+    const headline =
+      mockNews
+        .filter((n) => n.tickers.includes(stock.ticker))
+        .sort(
+          (a, b) =>
+            new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+        )[0]?.title ?? 'Pantau pergerakan saham ini';
+    const livePrice = quote?.price ?? stock.price;
+    const livePct = quote?.changePercent ?? stock.changePercent;
+    live.start(
+      { ticker: stock.ticker, companyName: stock.name },
+      {
+        price: `Rp ${formatIDR(livePrice)}`,
+        changePercent: livePct,
+        headline,
+      }
+    );
+  }, [live, stock, quote]);
 
   if (!stock) return <NotFound ticker={ticker ?? '—'} />;
 
@@ -181,6 +211,35 @@ export default function StockDetailScreen() {
           </View>
           <Text style={styles.sectorLabel}>{stock.sector}</Text>
         </View>
+
+        {/* ── Pin to Lock Screen (iOS Live Activity) ──────────────────── */}
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity
+            style={[styles.pinBtn, live.isActive && styles.pinBtnActive]}
+            onPress={handleTogglePin}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={
+              live.isActive
+                ? `Lepas ${stock.ticker} dari lock screen`
+                : `Sematkan ${stock.ticker} ke lock screen`
+            }
+          >
+            <Ionicons
+              name={live.isActive ? 'lock-open-outline' : 'lock-closed-outline'}
+              size={IconSize.sm}
+              color={live.isActive ? Colors.text.muted : Colors.brand.accent}
+            />
+            <Text
+              style={[
+                styles.pinBtnText,
+                live.isActive && styles.pinBtnTextActive,
+              ]}
+            >
+              {live.isActive ? 'Lepas dari Lock Screen' : 'Sematkan ke Lock Screen'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* ── Chart ───────────────────────────────────────────────────── */}
         <View style={styles.chartCard}>
@@ -355,6 +414,33 @@ const styles = StyleSheet.create({
     color: Colors.text.muted,
     marginTop: 2,
     letterSpacing: LetterSpacing.wide,
+  },
+
+  // Pin to lock screen button
+  pinBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: Layout.screenPaddingX,
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: Radius.component,
+    borderWidth: Border.width,
+    borderColor: Colors.brand.accent,
+    backgroundColor: withAlpha13(Colors.brand.accent),
+  },
+  pinBtnActive: {
+    borderColor: Colors.border.default,
+    backgroundColor: Colors.background.surface,
+  },
+  pinBtnText: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+    color: Colors.brand.accent,
+  },
+  pinBtnTextActive: {
+    color: Colors.text.muted,
   },
 
   // Chart card
