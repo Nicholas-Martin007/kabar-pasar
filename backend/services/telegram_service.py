@@ -26,8 +26,12 @@ from models.news import News
 
 logger = logging.getLogger(__name__)
 
-_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def _token() -> str:
+    """Read the token lazily so it picks up .env loaded after import."""
+    return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _ALERTS_PER_CYCLE = 5  # cap messages per subscriber per refresh to avoid spam
 
 # Ephemeral link codes for connecting the app's in-app watchlist to a chat.
@@ -65,11 +69,11 @@ def consume_link_code(code: str) -> Optional[str]:
 
 
 def is_enabled() -> bool:
-    return bool(_TOKEN)
+    return bool(_token())
 
 
 async def _post(method: str, payload: dict, timeout: float = 15) -> Optional[dict]:
-    url = _API.format(token=_TOKEN, method=method)
+    url = _API.format(token=_token(), method=method)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, json=payload)
@@ -81,7 +85,7 @@ async def _post(method: str, payload: dict, timeout: float = 15) -> Optional[dic
 
 
 async def send_message(chat_id: str, text: str) -> None:
-    if not _TOKEN:
+    if not _token():
         return
     await _post(
         "sendMessage",
@@ -109,7 +113,7 @@ def _format_alert(item: News) -> str:
 
 async def dispatch_alerts(new_items: List[News]) -> int:
     """Push newly-ingested, ticker-tagged news to matching subscribers."""
-    if not _TOKEN:
+    if not _token():
         return 0
     items = [n for n in new_items if n.tickers]
     if not items:
@@ -190,7 +194,7 @@ async def _handle_command(chat_id: str, text: str) -> None:
 
 async def poll_updates_loop() -> None:
     """Long-poll getUpdates and route commands. Runs until cancelled."""
-    if not _TOKEN:
+    if not _token():
         logger.info("telegram.disabled (set TELEGRAM_BOT_TOKEN to enable)")
         return
 
