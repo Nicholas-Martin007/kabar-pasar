@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { useNewsFeed } from '@/src/hooks/useNews';
-import { useIndex, useReactions } from '@/src/hooks/useMarket';
+import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useWatchlist } from '@/src/context/WatchlistContext';
@@ -78,23 +78,44 @@ export default function HomeScreen() {
   const { data: reactionMap, isLoading: reactionsLoading } =
     useReactions(reactionItems);
 
-  const watchlistPreview: Stock[] = watchlistItems
-    .slice(0, 4)
-    .flatMap((w) => {
-      const s = mockStocks.find((s) => s.ticker === w.ticker);
-      return s ? [s] : [];
-    });
+  const previewTickers = React.useMemo(
+    () => watchlistItems.slice(0, 4).map((w) => w.ticker),
+    [watchlistItems]
+  );
+  const { data: previewQuotes, refetch: refetchQuotes } =
+    useQuotes(previewTickers);
+
+  const watchlistPreview: Stock[] = React.useMemo(
+    () =>
+      watchlistItems.slice(0, 4).flatMap((w) => {
+        const base = mockStocks.find((s) => s.ticker === w.ticker);
+        if (!base) return [];
+        const q = previewQuotes?.get(w.ticker);
+        if (!q?.available) return [base];
+        const pts = (q.sparkline ?? []).filter((x): x is number => x != null);
+        return [
+          {
+            ...base,
+            price: q.price ?? base.price,
+            change: q.change ?? base.change,
+            changePercent: q.changePercent ?? base.changePercent,
+            sparkline: pts.length > 1 ? pts : base.sparkline,
+          },
+        ];
+      }),
+    [watchlistItems, previewQuotes]
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setGreeting(getGreeting());
     setMarketStatus(getMarketStatus());
     try {
-      await Promise.all([refetch(), refetchIndex()]);
+      await Promise.all([refetch(), refetchIndex(), refetchQuotes()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refetch, refetchIndex]);
+  }, [refetch, refetchIndex, refetchQuotes]);
 
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));

@@ -70,13 +70,14 @@ export async function triggerRefresh(): Promise<Record<string, unknown>> {
 
 export interface Quote {
   ticker: string;
-  symbol: string;
+  symbol?: string;
+  available?: boolean;
   price: number | null;
-  previousClose: number | null;
+  previousClose?: number | null;
   change: number | null;
   changePercent: number | null;
-  currency: string | null;
-  marketState: string | null;
+  currency?: string | null;
+  marketState?: string | null;
   sparkline: (number | null)[];
 }
 
@@ -97,6 +98,15 @@ export async function fetchIndex(): Promise<Quote> {
 /** Live quote for a single IDX stock, e.g. "BBCA". */
 export async function fetchQuote(ticker: string): Promise<Quote> {
   return getJSON<Quote>(`/market/quote/${encodeURIComponent(ticker)}`);
+}
+
+/** Batched live quotes for a watchlist — one request for many tickers. */
+export async function fetchQuotes(tickers: string[]): Promise<Quote[]> {
+  if (tickers.length === 0) return [];
+  const res = await getJSON<{ quotes: Quote[] }>(
+    `/market/quotes?tickers=${encodeURIComponent(tickers.join(','))}`
+  );
+  return res.quotes;
 }
 
 /** Sparkline points for a ticker over a time range. */

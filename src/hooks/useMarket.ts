@@ -5,8 +5,10 @@ import {
   fetchChart,
   fetchIndex,
   fetchQuote,
+  fetchQuotes,
   fetchReaction,
   fetchReactions,
+  Quote,
   ReactionItem,
 } from '@/src/services/api';
 
@@ -31,6 +33,23 @@ export function useQuote(ticker?: string) {
     enabled: !!ticker,
     staleTime: STALE_MS,
     retry: 1,
+  });
+}
+
+/** Batched live quotes for a watchlist. Returns a ticker -> Quote Map. */
+export function useQuotes(tickers: string[]) {
+  const sig = [...tickers].sort().join(',');
+  return useQuery({
+    queryKey: ['market', 'quotes', sig],
+    queryFn: () => fetchQuotes(tickers),
+    enabled: tickers.length > 0,
+    staleTime: STALE_MS,
+    retry: 1,
+    select: (list): Map<string, Quote> => {
+      const map = new Map<string, Quote>();
+      for (const q of list) if (q.ticker) map.set(q.ticker, q);
+      return map;
+    },
   });
 }
 

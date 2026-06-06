@@ -8,6 +8,7 @@ NOTE: this is an unofficial endpoint — shape may change. Failures raise and th
 API layer returns 502; the frontend falls back to cached/mock values.
 """
 
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -20,6 +21,7 @@ IHSG_SYMBOL = "^JKSE"
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 _CACHE_TTL_SEC = 60
 _cache: Dict[str, Tuple[float, dict]] = {}
+_series_cache: Dict[str, Tuple[float, List[Tuple[int, float]]]] = {}
 
 # UI time-range -> (Yahoo range, interval)
 RANGE_INTERVAL: Dict[str, Tuple[str, str]] = {
@@ -106,7 +108,11 @@ def _parse_iso(at_iso: str) -> datetime:
 async def _fetch_series(
     symbol: str, range_: str, interval: str
 ) -> List[Tuple[int, float]]:
-    """Return [(unix_ts, close), ...] with nulls dropped, oldest first."""
+    """Return [(unix_ts, close), ...] with nulls dropped, oldest first (cached)."""
+    cache_key = f"{symbol}:{range_}:{interval}"
+    hit = _series_cache.get(cache_key)
+    if hit and (time.time() - hit[0]) < _CACHE_TTL_SEC:
+        return hit[1]
     async with httpx.AsyncClient(timeout=10, headers=_UA) as client:
         resp = await client.get(
             YAHOO_CHART.format(symbol=symbol),
@@ -123,7 +129,49 @@ async def _fetch_series(
         closes = result["indicators"]["quote"][0]["close"]
     except (KeyError, IndexError, TypeError):
         return []
-    return [(t, c) for t, c in zip(stamps, closes) if c is not None]
+    series = [(t, c) for t, c in zip(stamps, closes) if c is not None]
+    _series_cache[cache_key] = (time.time(), series)
+    return series
+
+
+async def _fetch_row_quote(ticker: str) -> dict:
+    """
+    Compact quote for list rows: live price, true day-over-day change, and a
+    short daily sparkline — all from ONE 5d/1d series fetch.
+    """
+    symbol = to_yahoo_symbol(ticker)
+    series = await _fetch_series(symbol, "5d", "1d")
+    closes = [c for _, c in series]
+    price = closes[-1] if closes else None
+    prev = closes[-2] if len(closes) >= 2 else None
+    change = (price - prev) if price is not None and prev is not None else None
+    pct = (change / prev * 100) if change is not None and prev else None
+    return {
+        "ticker": ticker.strip().upper(),
+        "symbol": symbol,
+        "available": price is not None,
+        "price": _round(price),
+        "change": _round(change),
+        "changePercent": _round(pct),
+        "sparkline": [_round(c) for c in closes],
+    }
+
+
+async def fetch_quotes(tickers: List[str]) -> List[dict]:
+    """Batched live quotes for a watchlist — fetched concurrently, deduped."""
+    unique = list(dict.fromkeys(t.strip().upper() for t in tickers if t.strip()))
+    if not unique:
+        return []
+    results = await asyncio.gather(
+        *[_fetch_row_quote(t) for t in unique], return_exceptions=True
+    )
+    out: List[dict] = []
+    for t, r in zip(unique, results):
+        if isinstance(r, Exception):
+            out.append({"ticker": t, "available": False})
+        else:
+            out.append(r)
+    return out
 
 
 def _pick_range_interval(age_days: float) -> Tuple[str, str]:

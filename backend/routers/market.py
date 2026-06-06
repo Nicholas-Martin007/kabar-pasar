@@ -10,6 +10,7 @@ from services.market_service import (
     IHSG_SYMBOL,
     RANGE_INTERVAL,
     fetch_quote,
+    fetch_quotes,
     fetch_reaction,
     fetch_reactions,
 )
@@ -36,6 +37,19 @@ async def market_quote(ticker: str) -> dict:
         return await fetch_quote(ticker)
     except Exception as exc:
         logger.warning("market.quote_failed ticker=%s error=%s", ticker, exc)
+        raise HTTPException(status_code=502, detail=f"Market data error: {exc}")
+
+
+@router.get("/quotes")
+async def market_quotes(
+    tickers: str = Query(..., description="Comma-separated tickers, e.g. BBCA,BBRI"),
+) -> dict:
+    """Batched live quotes for a watchlist (one request)."""
+    syms = [t for t in tickers.split(",") if t.strip()][:50]
+    try:
+        return {"quotes": await fetch_quotes(syms)}
+    except Exception as exc:
+        logger.warning("market.quotes_failed error=%s", exc)
         raise HTTPException(status_code=502, detail=f"Market data error: {exc}")
 
 

@@ -19,9 +19,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { StockRow } from '@/components/stock-row';
-import { mockNews } from '@/src/data/mockNews';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useWatchlist } from '@/src/context/WatchlistContext';
+import { useNewsFeed } from '@/src/hooks/useNews';
+import { useQuotes } from '@/src/hooks/useMarket';
 import {
   Border,
   Colors,
@@ -35,13 +36,6 @@ import {
   withAlpha13,
 } from '@/src/theme';
 import { Stock } from '@/src/types/stock';
-
-function countRecentNews(ticker: string): number {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  return mockNews.filter(
-    (n) => n.tickers.includes(ticker) && new Date(n.publishedAt).getTime() >= cutoff
-  ).length;
-}
 
 // ── Add Stock Modal ──────────────────────────────────────────────────────────
 
@@ -189,27 +183,54 @@ export default function WatchlistScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [refreshing, setRefreshing]     = useState(false);
 
+  const tickerList = useMemo(() => items.map((w) => w.ticker), [items]);
+  const { data: quoteMap, refetch: refetchQuotes } = useQuotes(tickerList);
+  const { data: allNews, refetch: refetchNews } = useNewsFeed();
+
+  // Merge live quote (price / change / sparkline) onto the catalog stock.
   const stocks = useMemo(
     () =>
       items.flatMap((w) => {
-        const s = mockStocks.find((s) => s.ticker === w.ticker);
-        return s ? [s] : [];
+        const base = mockStocks.find((s) => s.ticker === w.ticker);
+        if (!base) return [];
+        const q = quoteMap?.get(w.ticker);
+        if (!q?.available) return [base];
+        const pts = (q.sparkline ?? []).filter((x): x is number => x != null);
+        return [
+          {
+            ...base,
+            price: q.price ?? base.price,
+            change: q.change ?? base.change,
+            changePercent: q.changePercent ?? base.changePercent,
+            sparkline: pts.length > 1 ? pts : base.sparkline,
+          },
+        ];
       }),
-    [items]
+    [items, quoteMap]
   );
 
+  // Reactive news-count badge from the live feed (last 24h).
   const newsCountMap = useMemo(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const map: Record<string, number> = {};
     for (const { ticker } of items) {
-      map[ticker] = countRecentNews(ticker);
+      map[ticker] = allNews.filter(
+        (n) =>
+          n.tickers.includes(ticker) &&
+          new Date(n.publishedAt).getTime() >= cutoff
+      ).length;
     }
     return map;
-  }, [items]);
+  }, [items, allNews]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    try {
+      await Promise.all([refetchQuotes(), refetchNews()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchQuotes, refetchNews]);
 
   const handlePress = useCallback((ticker: string) => {
     router.push(`/stock/${ticker}` as never);
