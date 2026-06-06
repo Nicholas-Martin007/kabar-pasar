@@ -163,6 +163,24 @@ def _format_digest(items: List[dict]) -> str:
     return "\n".join(parts)
 
 
+async def send_test_ping() -> int:
+    """Send a timestamped test notification to all subscribers (for testing)."""
+    if not _token():
+        return 0
+    wib = datetime.now(timezone.utc) + timedelta(hours=7)
+    msg = (
+        "🔔 <b>Tes notifikasi</b>\n"
+        f"Bot Kabar Pasar aktif · {wib.strftime('%H:%M:%S')} WIB"
+    )
+    async with get_session() as session:
+        subs = await repo.list_subscribers(session)
+    sent = 0
+    for sub in subs:
+        await send_message(sub["chat_id"], msg)
+        sent += 1
+    return sent
+
+
 async def dispatch_digest(limit: int = 10) -> int:
     """Send each subscriber a daily summary of news matching their prefs."""
     if not _token():
@@ -305,6 +323,8 @@ async def _handle_command(chat_id: str, text: str) -> None:
                 "Masukkan di app Kabar Pasar (Profil → Hubungkan Telegram) "
                 "dalam 10 menit. Watchlist app-mu akan otomatis tersinkron."
             )
+        elif cmd == "test":
+            reply = "🔔 Tes notifikasi berhasil! Bot aktif dan terhubung. ✅"
         elif cmd == "stop":
             await repo.remove_subscriber(session, chat_id)
             reply = "🛑 Berhenti. Kamu tidak akan menerima notifikasi lagi."

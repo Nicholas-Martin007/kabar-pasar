@@ -16,13 +16,15 @@ from db.repository import upsert_news_items
 from db.session import get_session
 from services.ai_summarizer import summarize_batch
 from services.rss_service import fetch_all_news
-from services.telegram_service import dispatch_alerts, dispatch_digest
+from services.telegram_service import dispatch_alerts, dispatch_digest, send_test_ping
 
 logger = logging.getLogger(__name__)
 
 _AI_BATCH = int(os.getenv("AI_SUMMARY_BATCH", "10"))
 _REFRESH_MIN = int(os.getenv("REFRESH_INTERVAL_MIN", "5"))
 _DIGEST_HOUR_WIB = int(os.getenv("DIGEST_HOUR_WIB", "17"))  # 17:00 WIB default
+# Testing only: send a Telegram ping every N seconds (0 = off). Never use in prod.
+_TEST_ALERT_SECONDS = int(os.getenv("TEST_ALERT_SECONDS", "0"))
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
@@ -70,6 +72,13 @@ async def daily_digest_job() -> None:
         logger.warning("scheduler.digest_failed error=%s", exc)
 
 
+async def test_ping_job() -> None:
+    try:
+        await send_test_ping()
+    except Exception as exc:
+        logger.warning("scheduler.test_ping_failed error=%s", exc)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Idempotent — safe to call once on FastAPI startup."""
     global _scheduler
@@ -98,6 +107,23 @@ def start_scheduler() -> AsyncIOScheduler:
         coalesce=True,
         replace_existing=True,
     )
+    # Testing only: rapid Telegram ping to evaluate delivery.
+    if _TEST_ALERT_SECONDS > 0:
+        _scheduler.add_job(
+            test_ping_job,
+            trigger=IntervalTrigger(seconds=_TEST_ALERT_SECONDS),
+            id="test_ping",
+            name="Test Telegram ping",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        logger.warning(
+            "scheduler.TEST_ALERT enabled every %ds — for testing only, "
+            "set TEST_ALERT_SECONDS=0 to disable",
+            _TEST_ALERT_SECONDS,
+        )
+
     _scheduler.start()
     logger.info(
         "scheduler.started interval_min=%d ai_batch=%d digest_hour_wib=%d",
