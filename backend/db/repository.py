@@ -190,7 +190,68 @@ async def remove_subscriber(session: AsyncSession, chat_id: str) -> None:
 
 async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
     rows = (await session.execute(select(TelegramSubscriber))).scalars().all()
-    return [{"chat_id": r.chat_id, "tickers": list(r.tickers or [])} for r in rows]
+    return [
+        {
+            "chat_id": r.chat_id,
+            "tickers": list(r.tickers or []),
+            "keywords": list(r.keywords or []),
+            "all_news": bool(r.all_news),
+        }
+        for r in rows
+    ]
+
+
+async def get_subscriber(
+    session: AsyncSession, chat_id: str
+) -> Optional[Dict[str, Any]]:
+    r = await session.get(TelegramSubscriber, chat_id)
+    if r is None:
+        return None
+    return {
+        "chat_id": r.chat_id,
+        "tickers": list(r.tickers or []),
+        "keywords": list(r.keywords or []),
+        "all_news": bool(r.all_news),
+    }
+
+
+async def add_subscriber_keyword(
+    session: AsyncSession, chat_id: str, keyword: str
+) -> List[str]:
+    kw = keyword.strip().lower()
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(chat_id=chat_id, tickers=[], keywords=[])
+        session.add(sub)
+    words = list(sub.keywords or [])
+    if kw and kw not in words:
+        words.append(kw)
+    sub.keywords = sorted(words)
+    await session.commit()
+    return sub.keywords
+
+
+async def remove_subscriber_keyword(
+    session: AsyncSession, chat_id: str, keyword: str
+) -> List[str]:
+    kw = keyword.strip().lower()
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        return []
+    sub.keywords = [w for w in (sub.keywords or []) if w != kw]
+    await session.commit()
+    return sub.keywords
+
+
+async def set_subscriber_all_news(
+    session: AsyncSession, chat_id: str, on: bool
+) -> None:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(chat_id=chat_id, tickers=[], keywords=[])
+        session.add(sub)
+    sub.all_news = on
+    await session.commit()
 
 
 async def link_subscriber(

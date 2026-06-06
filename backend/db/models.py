@@ -47,6 +47,10 @@ class TelegramSubscriber(Base):
 
     chat_id:    Mapped[str]      = mapped_column(String(32), primary_key=True)
     tickers:    Mapped[List[str]] = mapped_column(JSON, default=list)
+    # Free-text topics/sources to follow (lowercase), e.g. "emas", "bloomberg".
+    keywords:   Mapped[List[str]] = mapped_column(JSON, default=list)
+    # Firehose: receive every news item regardless of watchlist/keywords.
+    all_news:   Mapped[bool]      = mapped_column(default=False)
     # Persistent token the linked app uses to push watchlist updates.
     link_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -40,15 +40,19 @@ _link_codes: Dict[str, Tuple[str, float]] = {}  # code -> (chat_id, expiry)
 
 HELP = (
     "<b>Kabar Pasar — Notifikasi Saham</b>\n\n"
-    "Perintah:\n"
+    "<b>Watchlist saham</b>\n"
     "/watch BBCA — pantau saham\n"
-    "/unwatch BBCA — berhenti pantau\n"
+    "/unwatch BBCA — berhenti pantau\n\n"
+    "<b>Topik &amp; sumber</b>\n"
+    "/follow emas — pantau topik/sumber (cth: gold, rupiah, bloomberg)\n"
+    "/unfollow emas — berhenti pantau topik\n"
+    "/all on — terima SEMUA berita · /all off — matikan\n\n"
+    "<b>Lainnya</b>\n"
     "/news — berita terbaru watchlist-mu\n"
-    "/list — lihat watchlist\n"
+    "/list — lihat langgananmu\n"
     "/link — hubungkan watchlist dari app\n"
     "/stop — berhenti semua notifikasi\n\n"
-    "Kamu akan menerima berita terbaru untuk saham di watchlist-mu, dari "
-    "Bloomberg Technoz, Kontan, CNBC Indonesia, Detik, Bisnis & BEI."
+    "Sumber: Bloomberg Technoz, Kontan, CNBC Indonesia, Detik, Bisnis &amp; BEI."
 )
 
 
@@ -101,22 +105,35 @@ async def send_message(chat_id: str, text: str) -> None:
 # ── Alert dispatch (called from the refresh job) ──────────────────────────────
 
 def _format_alert(item: News) -> str:
-    tickers = ", ".join(item.tickers)
-    lines = [f"📈 <b>{html.escape(tickers)}</b>", html.escape(item.title)]
+    head = ", ".join(item.tickers) if item.tickers else item.source.value
+    icon = "📈" if item.tickers else "📰"
+    lines = [f"{icon} <b>{html.escape(head)}</b>", html.escape(item.title)]
     if item.impact:
         lines.append(f"💡 {html.escape(item.impact)}")
-    lines.append(f"<i>{html.escape(item.source.value)}</i>")
+    if item.tickers:
+        lines.append(f"<i>{html.escape(item.source.value)}</i>")
     if item.url:
         lines.append(item.url)
     return "\n".join(lines)
 
 
+def _matches(sub: dict, item: News) -> bool:
+    """A subscriber gets an item if: firehose, ticker match, or keyword match."""
+    if sub.get("all_news"):
+        return True
+    if set(sub.get("tickers") or []).intersection(item.tickers):
+        return True
+    keywords = sub.get("keywords") or []
+    if keywords:
+        hay = f"{item.title} {item.excerpt} {item.source.value}".lower()
+        if any(kw in hay for kw in keywords):
+            return True
+    return False
+
+
 async def dispatch_alerts(new_items: List[News]) -> int:
-    """Push newly-ingested, ticker-tagged news to matching subscribers."""
-    if not _token():
-        return 0
-    items = [n for n in new_items if n.tickers]
-    if not items:
+    """Push newly-ingested news to subscribers by watchlist / topic / firehose."""
+    if not _token() or not new_items:
         return 0
 
     async with get_session() as session:
@@ -124,10 +141,7 @@ async def dispatch_alerts(new_items: List[News]) -> int:
 
     sent = 0
     for sub in subscribers:
-        watch = set(sub["tickers"])
-        if not watch:
-            continue
-        matched = [n for n in items if watch.intersection(n.tickers)]
+        matched = [n for n in new_items if _matches(sub, n)]
         for item in matched[:_ALERTS_PER_CYCLE]:
             await send_message(sub["chat_id"], _format_alert(item))
             sent += 1
@@ -153,9 +167,31 @@ async def _handle_command(chat_id: str, text: str) -> None:
         elif cmd == "unwatch" and arg:
             tickers = await repo.remove_subscriber_ticker(session, chat_id, arg)
             reply = f"❎ {arg} dihapus.\nWatchlist: {', '.join(tickers) or '—'}"
+        elif cmd == "follow" and arg:
+            keywords = await repo.add_subscriber_keyword(session, chat_id, arg)
+            reply = f"✅ Mengikuti topik «{arg.lower()}».\nTopik: {', '.join(keywords) or '—'}"
+        elif cmd == "unfollow" and arg:
+            keywords = await repo.remove_subscriber_keyword(session, chat_id, arg)
+            reply = f"❎ Berhenti «{arg.lower()}».\nTopik: {', '.join(keywords) or '—'}"
+        elif cmd == "all":
+            on = arg.lower() in ("on", "1", "ya", "true")
+            await repo.set_subscriber_all_news(session, chat_id, on)
+            reply = (
+                "📡 Semua berita: AKTIF. Kamu akan menerima setiap berita."
+                if on
+                else "📴 Semua berita: NONAKTIF."
+            )
         elif cmd == "list":
-            tickers = await repo.get_subscriber_tickers(session, chat_id)
-            reply = f"📋 Watchlist: {', '.join(tickers) or 'kosong'}"
+            sub = await repo.get_subscriber(session, chat_id)
+            if not sub:
+                reply = "Belum ada langganan. Mulai dengan /watch BBCA atau /follow emas."
+            else:
+                reply = (
+                    f"📋 <b>Langgananmu</b>\n"
+                    f"Saham: {', '.join(sub['tickers']) or '—'}\n"
+                    f"Topik: {', '.join(sub['keywords']) or '—'}\n"
+                    f"Semua berita: {'AKTIF' if sub['all_news'] else 'nonaktif'}"
+                )
         elif cmd == "news":
             tickers = await repo.get_subscriber_tickers(session, chat_id)
             if not tickers:
