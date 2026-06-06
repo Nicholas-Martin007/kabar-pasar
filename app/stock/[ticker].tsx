@@ -159,6 +159,10 @@ export default function StockDetailScreen() {
   const positive    = changePercent >= 0;
   const changeColor = positive ? Colors.sentiment.positive : Colors.sentiment.negative;
 
+  // Live Activities only work in a native build with the widget extension.
+  // Until then, show a disabled "coming soon" placeholder.
+  const canPin = live.isSupported();
+
   const relatedNews: News[] = mockNews
     .filter((n) => n.tickers.includes(stock.ticker))
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
@@ -213,33 +217,52 @@ export default function StockDetailScreen() {
         </View>
 
         {/* ── Pin to Lock Screen (iOS Live Activity) ──────────────────── */}
-        {Platform.OS === 'ios' && (
-          <TouchableOpacity
-            style={[styles.pinBtn, live.isActive && styles.pinBtnActive]}
-            onPress={handleTogglePin}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel={
-              live.isActive
-                ? `Lepas ${stock.ticker} dari lock screen`
-                : `Sematkan ${stock.ticker} ke lock screen`
-            }
-          >
-            <Ionicons
-              name={live.isActive ? 'lock-open-outline' : 'lock-closed-outline'}
-              size={IconSize.sm}
-              color={live.isActive ? Colors.text.muted : Colors.brand.accent}
-            />
-            <Text
-              style={[
-                styles.pinBtnText,
-                live.isActive && styles.pinBtnTextActive,
-              ]}
+        {Platform.OS === 'ios' &&
+          (canPin ? (
+            <TouchableOpacity
+              style={[styles.pinBtn, live.isActive && styles.pinBtnActive]}
+              onPress={handleTogglePin}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                live.isActive
+                  ? `Lepas ${stock.ticker} dari lock screen`
+                  : `Sematkan ${stock.ticker} ke lock screen`
+              }
             >
-              {live.isActive ? 'Lepas dari Lock Screen' : 'Sematkan ke Lock Screen'}
-            </Text>
-          </TouchableOpacity>
-        )}
+              <Ionicons
+                name={live.isActive ? 'lock-open-outline' : 'lock-closed-outline'}
+                size={IconSize.sm}
+                color={live.isActive ? Colors.text.muted : Colors.brand.accent}
+              />
+              <Text
+                style={[
+                  styles.pinBtnText,
+                  live.isActive && styles.pinBtnTextActive,
+                ]}
+              >
+                {live.isActive
+                  ? 'Lepas dari Lock Screen'
+                  : 'Sematkan ke Lock Screen'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            // Placeholder: feature needs a native build to function.
+            <View
+              style={[styles.pinBtn, styles.pinBtnDisabled]}
+              accessibilityRole="text"
+              accessibilityLabel="Live Activity lock screen, segera hadir"
+            >
+              <Ionicons
+                name="lock-closed-outline"
+                size={IconSize.sm}
+                color={Colors.text.muted}
+              />
+              <Text style={styles.pinBtnTextDisabled}>
+                Lock Screen · Segera hadir
+              </Text>
+            </View>
+          ))}
 
         {/* ── Chart ───────────────────────────────────────────────────── */}
         <View style={styles.chartCard}>
@@ -440,6 +463,16 @@ const styles = StyleSheet.create({
     color: Colors.brand.accent,
   },
   pinBtnTextActive: {
+    color: Colors.text.muted,
+  },
+  pinBtnDisabled: {
+    borderColor: Colors.border.default,
+    borderStyle: 'dashed',
+    backgroundColor: 'transparent',
+  },
+  pinBtnTextDisabled: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.medium,
     color: Colors.text.muted,
   },
 
