@@ -14,7 +14,9 @@ import asyncio
 import html
 import logging
 import os
-from typing import Any, Dict, List, Optional
+import secrets
+import time
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 
@@ -28,15 +30,38 @@ _TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 _API = "https://api.telegram.org/bot{token}/{method}"
 _ALERTS_PER_CYCLE = 5  # cap messages per subscriber per refresh to avoid spam
 
+# Ephemeral link codes for connecting the app's in-app watchlist to a chat.
+_LINK_TTL_SEC = 600  # 10 minutes
+_link_codes: Dict[str, Tuple[str, float]] = {}  # code -> (chat_id, expiry)
+
 HELP = (
     "<b>Kabar Pasar — Notifikasi Saham</b>\n\n"
     "Perintah:\n"
     "/watch BBCA — pantau saham\n"
     "/unwatch BBCA — berhenti pantau\n"
+    "/news — berita terbaru watchlist-mu\n"
     "/list — lihat watchlist\n"
+    "/link — hubungkan watchlist dari app\n"
     "/stop — berhenti semua notifikasi\n\n"
-    "Kamu akan menerima berita terbaru untuk saham di watchlist-mu."
+    "Kamu akan menerima berita terbaru untuk saham di watchlist-mu, dari "
+    "Bloomberg Technoz, Kontan, CNBC Indonesia, Detik, Bisnis & BEI."
 )
+
+
+def new_link_code(chat_id: str) -> str:
+    """Generate a 6-digit code that the app exchanges to link this chat."""
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    _link_codes[code] = (chat_id, time.time() + _LINK_TTL_SEC)
+    return code
+
+
+def consume_link_code(code: str) -> Optional[str]:
+    """Return the chat_id for a valid, unexpired code (single use)."""
+    entry = _link_codes.pop(code.strip(), None)
+    if not entry:
+        return None
+    chat_id, expiry = entry
+    return chat_id if time.time() <= expiry else None
 
 
 def is_enabled() -> bool:
@@ -127,6 +152,33 @@ async def _handle_command(chat_id: str, text: str) -> None:
         elif cmd == "list":
             tickers = await repo.get_subscriber_tickers(session, chat_id)
             reply = f"📋 Watchlist: {', '.join(tickers) or 'kosong'}"
+        elif cmd == "news":
+            tickers = await repo.get_subscriber_tickers(session, chat_id)
+            if not tickers:
+                reply = "Watchlist kosong. Tambah dulu, contoh: /watch BBCA"
+            else:
+                items = await repo.latest_news_for_tickers(session, tickers, limit=5)
+                if not items:
+                    reply = f"Belum ada berita terbaru untuk: {', '.join(tickers)}"
+                else:
+                    parts = ["📰 <b>Berita Watchlist</b>"]
+                    for it in items:
+                        tix = ", ".join(it["tickers"])
+                        block = (
+                            f"\n• <b>{html.escape(tix)}</b> — "
+                            f"{html.escape(it['title'])}\n  <i>{html.escape(it['source'])}</i>"
+                        )
+                        if it["url"]:
+                            block += f"\n  {it['url']}"
+                        parts.append(block)
+                    reply = "\n".join(parts)
+        elif cmd == "link":
+            code = new_link_code(chat_id)
+            reply = (
+                f"🔗 Kode tautan: <b>{code}</b>\n"
+                "Masukkan di app Kabar Pasar (Profil → Hubungkan Telegram) "
+                "dalam 10 menit. Watchlist app-mu akan otomatis tersinkron."
+            )
         elif cmd == "stop":
             await repo.remove_subscriber(session, chat_id)
             reply = "🛑 Berhenti. Kamu tidak akan menerima notifikasi lagi."

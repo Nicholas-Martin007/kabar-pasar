@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -21,6 +22,7 @@ import {
   type ThemePreference,
   useSettings,
 } from '@/src/context/SettingsContext';
+import { useTelegramLink } from '@/src/context/TelegramLinkContext';
 import {
   Border,
   Colors,
@@ -196,6 +198,105 @@ const CATEGORY_LABELS: Record<NewsCategory, string> = {
 
 const CATEGORIES = Object.keys(CATEGORY_LABELS) as NewsCategory[];
 
+// ── Telegram link section ────────────────────────────────────────────────────
+
+function TelegramSection() {
+  const { isLinked, linking, error, link, unlink } = useTelegramLink();
+  const [modal, setModal] = useState(false);
+  const [code, setCode] = useState('');
+
+  const handleLink = async () => {
+    const ok = await link(code);
+    if (ok) {
+      setModal(false);
+      setCode('');
+      Alert.alert(
+        'Telegram tersambung',
+        'Watchlist kamu akan otomatis tersinkron. Kamu akan menerima notifikasi berita di Telegram.'
+      );
+    }
+  };
+
+  const confirmUnlink = () =>
+    Alert.alert('Putuskan Telegram', 'Berhenti sinkron watchlist ke Telegram?', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Putuskan', style: 'destructive', onPress: unlink },
+    ]);
+
+  return (
+    <Section title="Telegram">
+      {isLinked ? (
+        <>
+          <Row
+            label="Telegram tersambung"
+            sublabel="Watchlist tersinkron otomatis"
+            left={
+              <Ionicons name="checkmark-circle" size={IconSize.sm} color={Colors.brand.accent} />
+            }
+          />
+          <Row label="Putuskan Telegram" danger last onPress={confirmUnlink} />
+        </>
+      ) : (
+        <Row
+          label="Hubungkan Telegram"
+          sublabel="Terima notifikasi berita watchlist di Telegram (gratis)"
+          left={
+            <Ionicons name="paper-plane-outline" size={IconSize.sm} color={Colors.brand.accent} />
+          }
+          onPress={() => setModal(true)}
+          last
+        />
+      )}
+
+      <Modal
+        visible={modal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setModal(false)}
+      >
+        <SafeAreaView style={styles.pickerScreen} edges={['top', 'bottom']}>
+          <View style={styles.pickerHeader}>
+            <Text style={styles.pickerTitle}>Hubungkan Telegram</Text>
+            <TouchableOpacity
+              onPress={() => setModal(false)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={IconSize.md} color={Colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.tgBody}>
+            <Text style={styles.tgHelp}>
+              1. Buka bot Kabar Pasar di Telegram, kirim{'  '}
+              <Text style={styles.tgMono}>/link</Text>
+              {'\n'}2. Masukkan kode 6 digit yang dikirim bot di bawah ini.
+            </Text>
+            <TextInput
+              style={styles.tgInput}
+              value={code}
+              onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
+              placeholder="123456"
+              placeholderTextColor={Colors.text.muted}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            {error && <Text style={styles.tgError}>{error}</Text>}
+            <TouchableOpacity
+              style={[styles.tgBtn, (linking || code.length < 6) && styles.tgBtnDisabled]}
+              disabled={linking || code.length < 6}
+              onPress={handleLink}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.tgBtnText}>
+                {linking ? 'Menghubungkan…' : 'Hubungkan'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </Section>
+  );
+}
+
 // ── Profile screen ───────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
@@ -299,6 +400,9 @@ export default function ProfileScreen() {
             />
           ))}
         </Section>
+
+        {/* ── Telegram ─────────────────────────────────────────────────── */}
+        <TelegramSection />
 
         {/* ── Quiet hours ──────────────────────────────────────────────── */}
         <Section title="Jam Tenang">
@@ -605,6 +709,52 @@ const styles = StyleSheet.create({
   hourTextSelected: {
     color: Colors.brand.accent,
     fontWeight: FontWeight.bold,
+  },
+
+  // Telegram link modal
+  tgBody: {
+    padding: Layout.screenPaddingX,
+    gap: 16,
+  },
+  tgHelp: {
+    fontSize: FontSize.body,
+    color: Colors.text.secondary,
+    lineHeight: 22,
+  },
+  tgMono: {
+    color: Colors.brand.accent,
+    fontWeight: FontWeight.bold,
+  },
+  tgInput: {
+    backgroundColor: Colors.background.surface,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
+    borderRadius: Radius.component,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: FontSize.title,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+    letterSpacing: 8,
+    textAlign: 'center',
+  },
+  tgError: {
+    fontSize: FontSize.caption,
+    color: Colors.sentiment.negative,
+  },
+  tgBtn: {
+    backgroundColor: Colors.brand.accent,
+    borderRadius: Radius.component,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  tgBtnDisabled: {
+    opacity: 0.5,
+  },
+  tgBtnText: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    color: Colors.background.screen,
   },
 
   // Footer

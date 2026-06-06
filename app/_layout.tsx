@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BookmarksProvider } from '@/src/context/BookmarksContext';
 import { SettingsProvider } from '@/src/context/SettingsContext';
+import { TelegramLinkProvider } from '@/src/context/TelegramLinkContext';
 import { WatchlistProvider } from '@/src/context/WatchlistContext';
 
 export const unstable_settings = {
@@ -24,6 +25,7 @@ export default function RootLayout() {
     <SettingsProvider>
     <WatchlistProvider>
     <BookmarksProvider>
+    <TelegramLinkProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
@@ -33,6 +35,7 @@ export default function RootLayout() {
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
+    </TelegramLinkProvider>
     </BookmarksProvider>
     </WatchlistProvider>
     </SettingsProvider>

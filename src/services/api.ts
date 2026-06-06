@@ -178,5 +178,41 @@ export async function fetchReactions(
   return res.reactions;
 }
 
+// ── Telegram linking ─────────────────────────────────────────────────────────
+
+export async function telegramEnabled(): Promise<{ enabled: boolean }> {
+  return getJSON('/telegram/enabled');
+}
+
+/** Exchange a /link code (from the bot) for a persistent link token. */
+export async function telegramLink(
+  code: string,
+  tickers: string[]
+): Promise<{ ok: boolean; linkToken: string }> {
+  return getJSON('/telegram/link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, tickers }),
+  });
+}
+
+/** Push the current in-app watchlist to the linked Telegram chat. */
+export async function telegramSync(
+  linkToken: string,
+  tickers: string[]
+): Promise<{ ok: boolean }> {
+  return getJSON('/telegram/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ linkToken, tickers }),
+  });
+}
+
+export async function telegramStatus(
+  linkToken: string
+): Promise<{ linked: boolean; tickers: string[] }> {
+  return getJSON(`/telegram/status?linkToken=${encodeURIComponent(linkToken)}`);
+}
+
 /** Bundled mock feed — used as an offline/dev fallback (see useNews hooks). */
 export const fallbackNews: News[] = mockNews;

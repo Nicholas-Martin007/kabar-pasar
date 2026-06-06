@@ -191,3 +191,76 @@ async def remove_subscriber(session: AsyncSession, chat_id: str) -> None:
 async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
     rows = (await session.execute(select(TelegramSubscriber))).scalars().all()
     return [{"chat_id": r.chat_id, "tickers": list(r.tickers or [])} for r in rows]
+
+
+async def link_subscriber(
+    session: AsyncSession, chat_id: str, link_token: str, tickers: List[str]
+) -> None:
+    """Attach a persistent link token + set the watchlist from the app."""
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(chat_id=chat_id, tickers=[])
+        session.add(sub)
+    sub.link_token = link_token
+    sub.tickers = sorted({t.upper() for t in tickers})
+    await session.commit()
+
+
+async def sync_subscriber_by_token(
+    session: AsyncSession, link_token: str, tickers: List[str]
+) -> bool:
+    row = (
+        await session.execute(
+            select(TelegramSubscriber).where(
+                TelegramSubscriber.link_token == link_token
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return False
+    row.tickers = sorted({t.upper() for t in tickers})
+    await session.commit()
+    return True
+
+
+async def get_subscriber_by_token(
+    session: AsyncSession, link_token: str
+) -> Optional[Dict[str, Any]]:
+    row = (
+        await session.execute(
+            select(TelegramSubscriber).where(
+                TelegramSubscriber.link_token == link_token
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return {"chat_id": row.chat_id, "tickers": list(row.tickers or [])}
+
+
+async def latest_news_for_tickers(
+    session: AsyncSession, tickers: List[str], limit: int = 5
+) -> List[Dict[str, Any]]:
+    """Most recent cached news whose tickers overlap the given set."""
+    tset = {t.upper() for t in tickers}
+    if not tset:
+        return []
+    rows = (
+        await session.execute(
+            select(NewsRow).order_by(NewsRow.published_at.desc()).limit(300)
+        )
+    ).scalars().all()
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        if tset.intersection(r.tickers or []):
+            out.append(
+                {
+                    "title": r.title,
+                    "source": r.source,
+                    "url": r.url,
+                    "tickers": list(r.tickers or []),
+                }
+            )
+            if len(out) >= limit:
+                break
+    return out
