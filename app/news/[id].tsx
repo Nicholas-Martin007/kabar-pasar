@@ -30,7 +30,7 @@ import {
   withAlpha13,
 } from '@/src/theme';
 import { News, NewsCategory, NewsImportance } from '@/src/types/news';
-import { timeAgo } from '@/utils/time';
+import { formatDateTime } from '@/utils/time';
 
 // ── Label maps ───────────────────────────────────────────────────────────────
 
@@ -185,7 +185,7 @@ export default function NewsDetailScreen() {
             {news.source}
           </Text>
           <Text style={styles.dotSep}>·</Text>
-          <Text style={styles.timeText}>{timeAgo(news.publishedAt)}</Text>
+          <Text style={styles.timeText}>{formatDateTime(news.publishedAt)}</Text>
         </View>
 
         {/* ── Headline ────────────────────────────────────────────────── */}

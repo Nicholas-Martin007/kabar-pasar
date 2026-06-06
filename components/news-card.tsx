@@ -17,7 +17,7 @@ import {
 } from '@/src/theme';
 import { Reaction } from '@/src/services/api';
 import { News, NewsImportance, NewsSource } from '@/src/types/news';
-import { timeAgo } from '@/utils/time';
+import { formatDateTime } from '@/utils/time';
 
 interface Props {
   item: News;
@@ -121,7 +121,7 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
             </View>
           )}
 
-          <Text style={styles.timeText}>{timeAgo(item.publishedAt)}</Text>
+          <Text style={styles.timeText}>{formatDateTime(item.publishedAt)}</Text>
         </View>
 
         {/* Row 2: title */}
