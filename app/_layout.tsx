@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { BookmarksProvider } from '@/src/context/BookmarksContext';
 import { SettingsProvider } from '@/src/context/SettingsContext';
 import { WatchlistProvider } from '@/src/context/WatchlistContext';
 
@@ -22,6 +23,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
     <SettingsProvider>
     <WatchlistProvider>
+    <BookmarksProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)"        options={{ headerShown: false }} />
@@ -31,6 +33,7 @@ export default function RootLayout() {
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
+    </BookmarksProvider>
     </WatchlistProvider>
     </SettingsProvider>
     </QueryClientProvider>

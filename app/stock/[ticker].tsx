@@ -16,6 +16,7 @@ import { LineChart } from '@/components/line-chart';
 import { NewsCard } from '@/components/news-card';
 import { mockStocks } from '@/src/data/mockStocks';
 import { mockStockStats } from '@/src/data/mockStockStats';
+import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useChart, useQuote, useReactions } from '@/src/hooks/useMarket';
@@ -110,9 +111,9 @@ export default function StockDetailScreen() {
   const stats    = ticker ? mockStockStats[ticker] : undefined;
   const inWatchlist = ticker ? contains(ticker) : false;
 
+  const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const [activeRange, setActiveRange] = useState<TimeRange>('1W');
   const [readIds,       setReadIds]   = useState(new Set<string>());
-  const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
 
   // Live market data (falls back to mock stock values when unavailable).
   const { data: quote } = useQuote(ticker);
@@ -122,15 +123,6 @@ export default function StockDetailScreen() {
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
     router.push(`/news/${id}` as never);
-  }, []);
-
-  const handleBookmark = useCallback((id: string) => {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }, []);
 
   // Pin/unpin this stock to the iOS lock screen via a Live Activity.
@@ -385,7 +377,7 @@ export default function StockDetailScreen() {
                 key={item.id}
                 item={item}
                 isRead={readIds.has(item.id)}
-                isBookmarked={bookmarkedIds.has(item.id)}
+                isBookmarked={isBookmarked(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}
                 reaction={relatedReactionMap?.get(item.id)}

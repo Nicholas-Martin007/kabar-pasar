@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { NewsCard } from '@/components/news-card';
+import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useReaction } from '@/src/hooks/useMarket';
 import {
@@ -86,21 +87,12 @@ export default function NewsDetailScreen() {
   const primaryTicker = news?.tickers[0];
   const { data: reaction } = useReaction(primaryTicker, news?.publishedAt);
 
-  const [readIds,       setReadIds]       = useState(new Set<string>());
-  const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
+  const { isBookmarked, toggle: handleBookmark } = useBookmarks();
+  const [readIds, setReadIds] = useState(new Set<string>());
 
   const handleRelatedPress = useCallback((relatedId: string) => {
     setReadIds((prev) => new Set(prev).add(relatedId));
     router.push(`/news/${relatedId}` as never);
-  }, []);
-
-  const handleBookmark = useCallback((relatedId: string) => {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(relatedId)) next.delete(relatedId);
-      else next.add(relatedId);
-      return next;
-    });
   }, []);
 
   if (!news) return <NotFound />;
@@ -306,7 +298,7 @@ export default function NewsDetailScreen() {
                 key={item.id}
                 item={item}
                 isRead={readIds.has(item.id)}
-                isBookmarked={bookmarkedIds.has(item.id)}
+                isBookmarked={isBookmarked(item.id)}
                 onPress={handleRelatedPress}
                 onBookmark={handleBookmark}
               />

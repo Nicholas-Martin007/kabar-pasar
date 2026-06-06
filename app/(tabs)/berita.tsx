@@ -1,11 +1,12 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { router } from 'expo-router';
 
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
+import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
@@ -31,10 +32,11 @@ const CATEGORY_FOR_FILTER: Record<FeedFilter, NewsCategory[]> = {
 };
 
 export default function BeritaScreen() {
-  const { data: allNews } = useNewsFeed();
+  const { data: allNews, refetch: refetchNews } = useNewsFeed();
+  const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
+  const [refreshing,     setRefreshing]    = useState(false);
   const [readIds,        setReadIds]       = useState(new Set<string>());
-  const [bookmarkedIds,  setBookmarkedIds] = useState(new Set<string>());
 
   const filtered = React.useMemo(
     () =>
@@ -58,7 +60,7 @@ export default function BeritaScreen() {
         .map((n) => ({ key: n.id, ticker: n.tickers[0], at: n.publishedAt })),
     [filtered]
   );
-  const { data: reactionMap, isLoading: reactionsLoading } =
+  const { data: reactionMap, isLoading: reactionsLoading, refetch: refetchReactions } =
     useReactions(reactionItems);
 
   const handlePress = useCallback((id: string) => {
@@ -66,28 +68,28 @@ export default function BeritaScreen() {
     router.push(`/news/${id}` as never);
   }, []);
 
-  const handleBookmark = useCallback((id: string) => {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refetchNews(), refetchReactions()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchNews, refetchReactions]);
 
   const renderItem = useCallback(
     ({ item }: { item: News }) => (
       <NewsCard
         item={item}
         isRead={readIds.has(item.id)}
-        isBookmarked={bookmarkedIds.has(item.id)}
+        isBookmarked={isBookmarked(item.id)}
         onPress={handlePress}
         onBookmark={handleBookmark}
         reaction={reactionMap?.get(item.id)}
         reactionLoading={reactionsLoading}
       />
     ),
-    [readIds, bookmarkedIds, handlePress, handleBookmark, reactionMap, reactionsLoading]
+    [readIds, isBookmarked, handlePress, handleBookmark, reactionMap, reactionsLoading]
   );
 
   const renderHeader = useCallback(
@@ -119,6 +121,14 @@ export default function BeritaScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors.brand.accent}
+            colors={[Colors.brand.accent]}
+          />
+        }
       />
     </SafeAreaView>
   );

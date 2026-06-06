@@ -17,6 +17,7 @@ import { useNewsFeed } from '@/src/hooks/useNews';
 import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
+import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
   Border,
@@ -46,13 +47,13 @@ function formatIHSG(value: number): string {
 
 export default function HomeScreen() {
   const { items: watchlistItems } = useWatchlist();
+  const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const { data: allNews, refetch } = useNewsFeed();
   const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const [greeting,      setGreeting]      = useState(getGreeting);
   const [marketStatus,  setMarketStatus]  = useState(getMarketStatus);
   const [refreshing,    setRefreshing]    = useState(false);
   const [readIds,       setReadIds]       = useState(new Set<string>());
-  const [bookmarkedIds, setBookmarkedIds] = useState(new Set<string>());
 
   // Top 3 high-importance items, newest first.
   const topNews: News[] = React.useMemo(
@@ -120,15 +121,6 @@ export default function HomeScreen() {
   const handleNewsPress = useCallback((id: string) => {
     setReadIds((prev) => new Set(prev).add(id));
     router.push(`/news/${id}` as never);
-  }, []);
-
-  const handleBookmark = useCallback((id: string) => {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }, []);
 
   const handleStockPress = useCallback((ticker: string) => {
@@ -208,7 +200,7 @@ export default function HomeScreen() {
                 key={item.id}
                 item={item}
                 isRead={readIds.has(item.id)}
-                isBookmarked={bookmarkedIds.has(item.id)}
+                isBookmarked={isBookmarked(item.id)}
                 onPress={handleNewsPress}
                 onBookmark={handleBookmark}
                 reaction={reactionMap?.get(item.id)}
