@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 _AI_BATCH = int(os.getenv("AI_SUMMARY_BATCH", "10"))
 _REFRESH_MIN = int(os.getenv("REFRESH_INTERVAL_MIN", "5"))
 _DIGEST_HOUR_WIB = int(os.getenv("DIGEST_HOUR_WIB", "17"))  # 17:00 WIB default
+# Hourly "to read" digest: top N news every N hours (0 = off).
+_HOURLY_DIGEST_HOURS = int(os.getenv("HOURLY_DIGEST_HOURS", "1"))
+_HOURLY_DIGEST_COUNT = int(os.getenv("HOURLY_DIGEST_COUNT", "10"))
 # Testing only: send a Telegram ping every N seconds (0 = off). Never use in prod.
 _TEST_ALERT_SECONDS = int(os.getenv("TEST_ALERT_SECONDS", "0"))
 
@@ -73,6 +76,14 @@ async def daily_digest_job() -> None:
         logger.warning("scheduler.digest_failed error=%s", exc)
 
 
+async def hourly_digest_job() -> None:
+    try:
+        sent = await dispatch_digest(limit=_HOURLY_DIGEST_COUNT)
+        logger.info("scheduler.hourly_digest.done sent=%d", sent)
+    except Exception as exc:
+        logger.warning("scheduler.hourly_digest_failed error=%s", exc)
+
+
 async def test_ping_job() -> None:
     try:
         await send_test_news()
@@ -108,6 +119,18 @@ def start_scheduler() -> AsyncIOScheduler:
         coalesce=True,
         replace_existing=True,
     )
+    # Hourly "to read" digest (top N news per N hours).
+    if _HOURLY_DIGEST_HOURS > 0:
+        _scheduler.add_job(
+            hourly_digest_job,
+            trigger=IntervalTrigger(hours=_HOURLY_DIGEST_HOURS),
+            id="hourly_digest",
+            name="Hourly news digest",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
     # Testing only: rapid Telegram ping to evaluate delivery.
     if _TEST_ALERT_SECONDS > 0:
         _scheduler.add_job(

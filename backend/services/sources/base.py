@@ -22,8 +22,8 @@ from services.ticker_service import detect_tickers
 
 logger = logging.getLogger(__name__)
 
-_FEED_TIMEOUT = 10
-_USER_AGENT = "KabarPasar/0.1 (RSS aggregator)"
+_FEED_TIMEOUT = 12
+_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) KabarPasar/0.1"
 
 
 def stable_id(url: str, guid: str = "") -> str:

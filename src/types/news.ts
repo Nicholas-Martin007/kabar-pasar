@@ -4,6 +4,8 @@ export type NewsSource =
   | 'Kontan'
   | 'Bisnis Indonesia'
   | 'Bloomberg Technoz'
+  | 'Yahoo Finance'
+  | 'CNBC Global'
   | 'BEI'
   | 'IR Emiten';
 

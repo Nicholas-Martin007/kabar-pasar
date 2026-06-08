@@ -31,6 +31,8 @@ const P = {
   sky400:    '#3B9ED6', // 6.1:1 — Kontan
   indigo400: '#5B8EF5', // 5.8:1 — Bisnis Indonesia
   amber400:  '#F5A623', // ~9.6:1 — Bloomberg Technoz
+  violet400: '#A78BFA', // ~7.2:1 — Yahoo Finance
+  emerald400:'#34D399', // ~9.8:1 — CNBC Global
 } as const;
 
 export const Colors = {
@@ -67,6 +69,8 @@ export const Colors = {
     Kontan:             P.sky400,
     'Bisnis Indonesia': P.indigo400,
     'Bloomberg Technoz': P.amber400, // ~9.6:1 ✓
+    'Yahoo Finance':    P.violet400, // ~7.2:1 ✓
+    'CNBC Global':      P.emerald400, // ~9.8:1 ✓
     BEI:                P.teal400,   // 8.5:1 ✓
     'IR Emiten':        P.slate300,  // 6.3:1 ✓ — neutral for corporate IR
   },

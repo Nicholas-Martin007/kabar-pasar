@@ -16,9 +16,11 @@ from services.sources import (
     bei,
     bisnis_indonesia,
     bloomberg_technoz,
+    cnbc_global,
     cnbc_indonesia,
     detik,
     kontan,
+    yahoo_finance,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ SOURCES: List[tuple[str, Callable[[], Coroutine]]] = [
     ("kontan",           kontan.fetch),
     ("bisnis_indonesia", bisnis_indonesia.fetch),
     ("bloomberg_technoz", bloomberg_technoz.fetch),
+    ("yahoo_finance",    yahoo_finance.fetch),
+    ("cnbc_global",      cnbc_global.fetch),
 ]
 
 

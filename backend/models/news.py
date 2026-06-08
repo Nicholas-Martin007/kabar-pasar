@@ -11,6 +11,8 @@ class NewsSource(str, Enum):
     KONTAN            = "Kontan"
     BISNIS_INDONESIA  = "Bisnis Indonesia"
     BLOOMBERG_TECHNOZ = "Bloomberg Technoz"
+    YAHOO_FINANCE     = "Yahoo Finance"
+    CNBC_GLOBAL       = "CNBC Global"
     BEI               = "BEI"
     IR_EMITEN         = "IR Emiten"
 
