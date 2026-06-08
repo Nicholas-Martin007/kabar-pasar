@@ -35,10 +35,28 @@ _engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 _SessionFactory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
 
 
+_MIGRATIONS = [
+    # Columns added to telegram_subscriber over time. ALTER fails if the column
+    # already exists — caught and ignored, so this is safe every startup.
+    "ALTER TABLE telegram_subscriber ADD COLUMN keywords JSON",
+    "ALTER TABLE telegram_subscriber ADD COLUMN mute JSON",
+    "ALTER TABLE telegram_subscriber ADD COLUMN all_news BOOLEAN DEFAULT 0",
+    "ALTER TABLE telegram_subscriber ADD COLUMN high_only BOOLEAN DEFAULT 0",
+    "ALTER TABLE telegram_subscriber ADD COLUMN link_token VARCHAR(64)",
+]
+
+
 async def init_db() -> None:
-    """Create tables if they don't exist. Idempotent — safe to call every startup."""
+    """Create tables if missing + apply additive column migrations. Idempotent."""
+    from sqlalchemy import text
+
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for stmt in _MIGRATIONS:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # column already exists — fine
     logger.info("db.initialised url=%s", DATABASE_URL.split("://", 1)[0])
 
 
