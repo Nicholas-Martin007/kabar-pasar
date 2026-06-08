@@ -83,6 +83,35 @@ def guess_category(title: str, body: str) -> NewsCategory:
     return NewsCategory.MARKET_NEWS
 
 
+# Keyword heuristics for importance (free; no AI). Conservative on HIGH.
+_HIGH_KEYWORDS = (
+    # corporate actions
+    "dividen", "rights issue", "right issue", "buyback", "akuisisi", "merger",
+    "stock split", "tender offer", "private placement", "ipo", "go public",
+    "rups", "caplok", "ambil alih", "divestasi", "akuisisteen",
+    # distress / regulatory
+    "suspensi", "delisting", "pailit", "gagal bayar", "pkpu", "sanksi ojk",
+    "dibekukan", "bangkrut",
+    # market-moving macro / geopolitics
+    "bi rate", "suku bunga acuan", "the fed", "rate cut", "rate hike",
+    "tarif impor", "tariff", "perang", "invasi", "embargo", "resesi",
+)
+_LOW_KEYWORDS = (
+    "rekomendasi saham", "simak", "ini dia", "tips", "cara ", "zodiak",
+    "ramalan", "wisata", "resep", "lifestyle", "sepak bola", "drama korea",
+    "harga emas antam hari ini", "kurs rupiah hari ini",
+)
+
+
+def score_importance(title: str, body: str = "") -> NewsImportance:
+    text = (title + " " + body).lower()
+    if any(k in text for k in _HIGH_KEYWORDS):
+        return NewsImportance.HIGH
+    if any(k in text for k in _LOW_KEYWORDS):
+        return NewsImportance.LOW
+    return NewsImportance.MEDIUM
+
+
 async def fetch_rss(source: NewsSource, url: str) -> List[News]:
     """Fetch one RSS feed and return parsed News items."""
     try:
@@ -124,7 +153,7 @@ async def fetch_rss(source: NewsSource, url: str) -> List[News]:
                 excerpt=body,
                 ai_summary=[],
                 tickers=detect_tickers(title + " " + body),
-                importance=NewsImportance.MEDIUM,
+                importance=score_importance(title, body),
                 category=guess_category(title, body),
                 url=link or None,
             )

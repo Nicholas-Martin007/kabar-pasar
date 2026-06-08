@@ -193,14 +193,18 @@ def _matches_dict(sub: dict, item: dict) -> bool:
     return any(k in hay for k in kws) if kws else False
 
 
+_IMPORTANCE_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
 def _format_digest(items: List[dict]) -> str:
     wib = datetime.now(timezone.utc) + timedelta(hours=7)
-    parts = [f"📊 <b>Ringkasan Pasar — {wib.strftime('%d/%m/%Y')}</b>"]
+    parts = [f"📊 <b>Ringkasan Pasar — {wib.strftime('%d/%m/%Y %H:%M')} WIB</b>"]
     for it in items:
         tix = ", ".join(it.get("tickers") or [])
         head = f"<b>{html.escape(tix)}</b> — " if tix else ""
+        flag = "🔴 " if it.get("importance") == "high" else ""
         block = (
-            f"\n• {head}{html.escape(it['title'])}"
+            f"\n{flag}• {head}{html.escape(it['title'])}"
             f"\n  <i>{html.escape(it['source'])}</i>"
         )
         if it.get("url"):
@@ -255,7 +259,10 @@ async def dispatch_digest(limit: int = 10) -> int:
         recent = await repo.latest_news(session, limit=80)
     sent = 0
     for sub in subs:
-        matched = [it for it in recent if _matches_dict(sub, it)][:limit]
+        matched = [it for it in recent if _matches_dict(sub, it)]
+        # Most important first (stable sort keeps recency within a tier).
+        matched.sort(key=lambda it: _IMPORTANCE_RANK.get(it.get("importance"), 1))
+        matched = matched[:limit]
         if not matched:
             continue
         await send_message(sub["chat_id"], _format_digest(matched))

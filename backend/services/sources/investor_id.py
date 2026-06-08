@@ -15,10 +15,10 @@ from typing import List
 import httpx
 from bs4 import BeautifulSoup
 
-from models.news import News, NewsImportance, NewsSource
+from models.news import News, NewsSource
 from services.ticker_service import detect_tickers
 
-from .base import guess_category, stable_id
+from .base import guess_category, score_importance, stable_id
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ async def _fetch_section(url: str) -> List[News]:
                 excerpt=title,
                 ai_summary=[],
                 tickers=detect_tickers(title),
-                importance=NewsImportance.MEDIUM,
+                importance=score_importance(title, ""),
                 category=guess_category(title, ""),
                 url=full,
             )

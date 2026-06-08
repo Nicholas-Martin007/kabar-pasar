@@ -267,6 +267,7 @@ async def latest_news(
             "source": r.source,
             "url": r.url,
             "tickers": list(r.tickers or []),
+            "importance": r.importance,
         }
         for r in rows
     ]
@@ -406,6 +407,7 @@ async def latest_news_for_tickers(
                     "source": r.source,
                     "url": r.url,
                     "tickers": list(r.tickers or []),
+                    "importance": r.importance,
                 }
             )
             if len(out) >= limit:
