@@ -93,18 +93,50 @@ async def _post(method: str, payload: dict, timeout: float = 15) -> Optional[dic
         return None
 
 
-async def send_message(chat_id: str, text: str) -> None:
+async def send_message(
+    chat_id: str, text: str, reply_markup: Optional[dict] = None
+) -> None:
     if not _token():
         return
-    await _post(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    await _post("sendMessage", payload)
+
+
+async def _answer_callback(callback_id: str, text: str = "") -> None:
+    await _post("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
+
+
+def _in_quiet_hours() -> bool:
+    """QUIET_HOURS env like '22-6' (WIB). Suppresses push (not command replies)."""
+    raw = os.getenv("QUIET_HOURS", "").strip()
+    if "-" not in raw:
+        return False
+    try:
+        start, end = (int(x) for x in raw.split("-", 1))
+    except ValueError:
+        return False
+    if start == end:
+        return False
+    hour = (datetime.now(timezone.utc) + timedelta(hours=7)).hour
+    return start <= hour < end if start < end else (hour >= start or hour < end)
+
+
+def _alert_buttons(source: str, url: Optional[str]) -> dict:
+    """Inline keyboard: open article + mute this source."""
+    rows = []
+    if url:
+        rows.append([{"text": "📰 Buka", "url": url}])
+    rows.append(
+        [{"text": f"🔇 Mute {source}", "callback_data": f"mute:{source.lower()}"}]
     )
+    return {"inline_keyboard": rows}
 
 
 # ── Alert dispatch (called from the refresh job) ──────────────────────────────
@@ -204,7 +236,11 @@ async def send_test_news() -> int:
             )
             continue
         item = pool[_test_news_idx % len(pool)]
-        await send_message(sub["chat_id"], _format_alert_dict(item))
+        await send_message(
+            sub["chat_id"],
+            _format_alert_dict(item),
+            reply_markup=_alert_buttons(item["source"], item.get("url")),
+        )
         sent += 1
     _test_news_idx += 1
     return sent
@@ -212,7 +248,7 @@ async def send_test_news() -> int:
 
 async def dispatch_digest(limit: int = 10) -> int:
     """Send each subscriber a daily summary of news matching their prefs."""
-    if not _token():
+    if not _token() or _in_quiet_hours():
         return 0
     async with get_session() as session:
         subs = await repo.list_subscribers(session)
@@ -231,7 +267,7 @@ async def dispatch_digest(limit: int = 10) -> int:
 
 async def dispatch_alerts(new_items: List[News]) -> int:
     """Push newly-ingested news to subscribers by watchlist / topic / firehose."""
-    if not _token() or not new_items:
+    if not _token() or not new_items or _in_quiet_hours():
         return 0
 
     async with get_session() as session:
@@ -241,7 +277,11 @@ async def dispatch_alerts(new_items: List[News]) -> int:
     for sub in subscribers:
         matched = [n for n in new_items if _matches(sub, n)]
         for item in matched[:_ALERTS_PER_CYCLE]:
-            await send_message(sub["chat_id"], _format_alert(item))
+            await send_message(
+                sub["chat_id"],
+                _format_alert(item),
+                reply_markup=_alert_buttons(item.source.value, item.url),
+            )
             sent += 1
     if sent:
         logger.info("telegram.alerts_sent count=%d", sent)
@@ -376,6 +416,20 @@ async def _handle_command(chat_id: str, text: str) -> None:
     await send_message(chat_id, reply)
 
 
+async def _handle_callback(cq: dict) -> None:
+    """Handle inline-button taps (e.g. mute a source)."""
+    data = cq.get("data", "")
+    cq_id = cq.get("id", "")
+    chat_id = str((cq.get("message") or {}).get("chat", {}).get("id", ""))
+    if data.startswith("mute:") and chat_id:
+        topic = data.split(":", 1)[1].strip()
+        async with get_session() as session:
+            await repo.add_subscriber_mute(session, chat_id, topic)
+        await _answer_callback(cq_id, f"🔇 Dibisukan: {topic}")
+    else:
+        await _answer_callback(cq_id)
+
+
 async def poll_updates_loop() -> None:
     """Long-poll getUpdates and route commands. Runs until cancelled."""
     if not _token():
@@ -391,6 +445,10 @@ async def poll_updates_loop() -> None:
             )
             for upd in (data or {}).get("result", []):
                 offset = upd["update_id"] + 1
+                cq = upd.get("callback_query")
+                if cq:
+                    await _handle_callback(cq)
+                    continue
                 msg = upd.get("message") or upd.get("edited_message")
                 if not msg:
                     continue
