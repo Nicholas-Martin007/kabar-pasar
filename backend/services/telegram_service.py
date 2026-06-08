@@ -177,20 +177,31 @@ def _format_digest(items: List[dict]) -> str:
     return "\n".join(parts)
 
 
-async def send_test_ping() -> int:
-    """Send a timestamped test notification to all subscribers (for testing)."""
+_test_news_idx = 0
+
+
+async def send_test_news() -> int:
+    """
+    Testing only: push one REAL cached news item (rotating) to all subscribers,
+    so you can verify news delivery without waiting for genuinely-new articles.
+    """
+    global _test_news_idx
     if not _token():
         return 0
-    wib = datetime.now(timezone.utc) + timedelta(hours=7)
-    msg = (
-        "🔔 <b>Tes notifikasi</b>\n"
-        f"Bot Kabar Pasar aktif · {wib.strftime('%H:%M:%S')} WIB"
-    )
     async with get_session() as session:
         subs = await repo.list_subscribers(session)
+        recent = await repo.latest_news(session, limit=50)
+    if not subs:
+        return 0
+    if not recent:
+        for sub in subs:
+            await send_message(sub["chat_id"], "ℹ️ Belum ada berita di cache. Tunggu refresh.")
+        return len(subs)
+    item = recent[_test_news_idx % len(recent)]
+    _test_news_idx += 1
     sent = 0
     for sub in subs:
-        await send_message(sub["chat_id"], msg)
+        await send_message(sub["chat_id"], _format_alert_dict(item))
         sent += 1
     return sent
 

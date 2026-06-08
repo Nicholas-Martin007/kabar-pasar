@@ -16,7 +16,7 @@ from db.repository import upsert_news_items
 from db.session import get_session
 from services.ai_summarizer import summarize_batch
 from services.rss_service import fetch_all_news
-from services.telegram_service import dispatch_alerts, dispatch_digest, send_test_ping
+from services.telegram_service import dispatch_alerts, dispatch_digest, send_test_news
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def daily_digest_job() -> None:
 
 async def test_ping_job() -> None:
     try:
-        await send_test_ping()
+        await send_test_news()
     except Exception as exc:
         logger.warning("scheduler.test_ping_failed error=%s", exc)
 
