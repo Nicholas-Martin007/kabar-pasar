@@ -67,6 +67,7 @@ class PrefsRequest(BaseModel):
     linkToken: str
     all_news: Optional[bool] = None
     mute: Optional[List[str]] = None
+    high_only: Optional[bool] = None
 
 
 @router.get("/prefs")
@@ -84,7 +85,11 @@ async def telegram_get_prefs(
 async def telegram_set_prefs(body: PrefsRequest) -> dict:
     async with get_session() as session:
         ok = await repo.set_prefs_by_token(
-            session, body.linkToken, all_news=body.all_news, mute=body.mute
+            session,
+            body.linkToken,
+            all_news=body.all_news,
+            mute=body.mute,
+            high_only=body.high_only,
         )
         if not ok:
             raise HTTPException(status_code=404, detail="Tautan tidak ditemukan")

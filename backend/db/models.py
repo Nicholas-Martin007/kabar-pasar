@@ -53,6 +53,8 @@ class TelegramSubscriber(Base):
     mute:       Mapped[List[str]] = mapped_column(JSON, default=list)
     # Firehose: receive every news item (default ON for new /start subscribers).
     all_news:   Mapped[bool]      = mapped_column(default=False)
+    # Only deliver HIGH-importance news (applied on top of the other filters).
+    high_only:  Mapped[bool]      = mapped_column(default=False)
     # Persistent token the linked app uses to push watchlist updates.
     link_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

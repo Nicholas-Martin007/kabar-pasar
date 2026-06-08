@@ -202,6 +202,7 @@ async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
             "keywords": list(r.keywords or []),
             "mute": list(r.mute or []),
             "all_news": bool(r.all_news),
+            "high_only": bool(r.high_only),
         }
         for r in rows
     ]
@@ -219,6 +220,7 @@ async def get_subscriber(
         "keywords": list(r.keywords or []),
         "mute": list(r.mute or []),
         "all_news": bool(r.all_news),
+        "high_only": bool(r.high_only),
     }
 
 
@@ -312,6 +314,17 @@ async def set_subscriber_all_news(
     await session.commit()
 
 
+async def set_subscriber_high_only(
+    session: AsyncSession, chat_id: str, on: bool
+) -> None:
+    sub = await session.get(TelegramSubscriber, chat_id)
+    if sub is None:
+        sub = TelegramSubscriber(chat_id=chat_id, tickers=[], keywords=[])
+        session.add(sub)
+    sub.high_only = on
+    await session.commit()
+
+
 async def link_subscriber(
     session: AsyncSession, chat_id: str, link_token: str, tickers: List[str]
 ) -> None:
@@ -360,6 +373,7 @@ async def get_subscriber_by_token(
         "keywords": list(row.keywords or []),
         "mute": list(row.mute or []),
         "all_news": bool(row.all_news),
+        "high_only": bool(row.high_only),
     }
 
 
@@ -368,6 +382,7 @@ async def set_prefs_by_token(
     link_token: str,
     all_news: Optional[bool] = None,
     mute: Optional[List[str]] = None,
+    high_only: Optional[bool] = None,
 ) -> bool:
     row = (
         await session.execute(
@@ -382,6 +397,8 @@ async def set_prefs_by_token(
         row.all_news = bool(all_news)
     if mute is not None:
         row.mute = sorted({m.strip().lower() for m in mute if m.strip()})
+    if high_only is not None:
+        row.high_only = bool(high_only)
     await session.commit()
     return True
 

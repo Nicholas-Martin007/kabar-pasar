@@ -45,6 +45,7 @@ HELP = (
     "<b>Saring</b>\n"
     "/mute emas — bisukan topik/sumber (cth: gold, bola, bloomberg)\n"
     "/unmute emas — aktifkan lagi\n"
+    "/important on — hanya berita PENTING · /important off\n"
     "/all off — berhenti terima semua · /all on — terima semua lagi\n\n"
     "<b>Mode pilihan</b> (saat /all off)\n"
     "/watch BBCA — hanya saham tertentu\n"
@@ -154,19 +155,23 @@ def _format_alert(item: News) -> str:
     return "\n".join(lines)
 
 
-def _matches(sub: dict, item: News) -> bool:
-    """
-    Firehose (all_news): everything EXCEPT muted topics/sources.
-    Selective: watchlist tickers OR followed keywords.
-    """
-    hay = f"{item.title} {item.excerpt} {item.source.value}".lower()
+def _base_match(sub: dict, hay: str, tickers) -> bool:
+    """Firehose (minus mutes) OR watchlist tickers OR followed keywords."""
     if sub.get("all_news"):
-        mutes = sub.get("mute") or []
-        return not any(m in hay for m in mutes)
-    if set(sub.get("tickers") or []).intersection(item.tickers):
+        return not any(m in hay for m in (sub.get("mute") or []))
+    if set(sub.get("tickers") or []).intersection(tickers or []):
         return True
     keywords = sub.get("keywords") or []
     return any(kw in hay for kw in keywords) if keywords else False
+
+
+def _matches(sub: dict, item: News) -> bool:
+    hay = f"{item.title} {item.excerpt} {item.source.value}".lower()
+    if not _base_match(sub, hay, item.tickers):
+        return False
+    if sub.get("high_only") and item.importance.value != "high":
+        return False
+    return True
 
 
 def _format_alert_dict(item: dict) -> str:
@@ -185,12 +190,11 @@ def _format_alert_dict(item: dict) -> str:
 def _matches_dict(sub: dict, item: dict) -> bool:
     """Dict-based variant of _matches for digest (news rows from the DB)."""
     hay = f"{item['title']} {item['source']}".lower()
-    if sub.get("all_news"):
-        return not any(m in hay for m in (sub.get("mute") or []))
-    if set(sub.get("tickers") or []).intersection(item.get("tickers") or []):
-        return True
-    kws = sub.get("keywords") or []
-    return any(k in hay for k in kws) if kws else False
+    if not _base_match(sub, hay, item.get("tickers")):
+        return False
+    if sub.get("high_only") and item.get("importance") != "high":
+        return False
+    return True
 
 
 _IMPORTANCE_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -342,6 +346,14 @@ async def _handle_command(chat_id: str, text: str) -> None:
                 if on
                 else "📴 Semua berita: NONAKTIF. Hanya /watch & /follow yang dikirim."
             )
+        elif cmd == "important":
+            on = arg.lower() in ("on", "1", "ya", "true", "")  # bare /important = on
+            await repo.set_subscriber_high_only(session, chat_id, on)
+            reply = (
+                "🔴 Hanya berita PENTING: AKTIF. Hanya berita high-importance dikirim."
+                if on
+                else "⚪ Hanya berita penting: NONAKTIF. Semua tingkat dikirim."
+            )
         elif cmd == "list":
             sub = await repo.get_subscriber(session, chat_id)
             if not sub:
@@ -350,6 +362,7 @@ async def _handle_command(chat_id: str, text: str) -> None:
                 reply = (
                     f"📋 <b>Pengaturanmu</b>\n"
                     f"Semua berita: {'AKTIF' if sub['all_news'] else 'nonaktif'}\n"
+                    f"Hanya berita penting: {'AKTIF 🔴' if sub.get('high_only') else 'nonaktif'}\n"
                     f"Dibisukan: {', '.join(sub['mute']) or '—'}\n"
                     f"Saham (mode pilihan): {', '.join(sub['tickers']) or '—'}\n"
                     f"Topik (mode pilihan): {', '.join(sub['keywords']) or '—'}"

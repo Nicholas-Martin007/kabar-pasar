@@ -210,6 +210,7 @@ function TelegramSection() {
     unlink,
     prefs,
     setAllNews,
+    setHighOnly,
     addMute,
     removeMute,
   } = useTelegramLink();
@@ -251,6 +252,12 @@ function TelegramSection() {
             sublabel="Terima semua berita di Telegram"
             value={prefs?.all_news ?? true}
             onValueChange={setAllNews}
+          />
+          <Toggle
+            label="Hanya berita penting"
+            sublabel="Hanya kirim berita high-importance 🔴"
+            value={prefs?.high_only ?? false}
+            onValueChange={setHighOnly}
           />
           <View style={styles.tgMuteBlock}>
             <Text style={styles.tgMuteLabel}>Topik dibisukan</Text>

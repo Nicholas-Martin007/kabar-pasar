@@ -219,6 +219,7 @@ export interface TelegramPrefs {
   keywords: string[];
   mute: string[];
   all_news: boolean;
+  high_only: boolean;
 }
 
 export async function telegramGetPrefs(linkToken: string): Promise<TelegramPrefs> {
@@ -227,7 +228,7 @@ export async function telegramGetPrefs(linkToken: string): Promise<TelegramPrefs
 
 export async function telegramSetPrefs(
   linkToken: string,
-  patch: { all_news?: boolean; mute?: string[] }
+  patch: { all_news?: boolean; mute?: string[]; high_only?: boolean }
 ): Promise<TelegramPrefs> {
   return getJSON('/telegram/prefs', {
     method: 'POST',

@@ -30,6 +30,7 @@ interface TelegramLinkValue {
   // Bot preferences (when linked).
   prefs: TelegramPrefs | null;
   setAllNews: (on: boolean) => void;
+  setHighOnly: (on: boolean) => void;
   addMute: (topic: string) => void;
   removeMute: (topic: string) => void;
 }
@@ -84,6 +85,17 @@ export function TelegramLinkProvider({ children }: { children: React.ReactNode }
       if (!linkToken) return;
       setPrefs((p) => (p ? { ...p, all_news: on } : p)); // optimistic
       telegramSetPrefs(linkToken, { all_news: on })
+        .then(setPrefs)
+        .catch(() => {});
+    },
+    [linkToken]
+  );
+
+  const setHighOnly = useCallback(
+    (on: boolean) => {
+      if (!linkToken) return;
+      setPrefs((p) => (p ? { ...p, high_only: on } : p)); // optimistic
+      telegramSetPrefs(linkToken, { high_only: on })
         .then(setPrefs)
         .catch(() => {});
     },
@@ -150,10 +162,14 @@ export function TelegramLinkProvider({ children }: { children: React.ReactNode }
       unlink,
       prefs,
       setAllNews,
+      setHighOnly,
       addMute,
       removeMute,
     }),
-    [linkToken, linking, error, link, unlink, prefs, setAllNews, addMute, removeMute]
+    [
+      linkToken, linking, error, link, unlink, prefs,
+      setAllNews, setHighOnly, addMute, removeMute,
+    ]
   );
 
   return (
