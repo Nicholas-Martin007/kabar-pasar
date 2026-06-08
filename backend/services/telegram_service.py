@@ -53,6 +53,7 @@ HELP = (
     "<b>Lainnya</b>\n"
     "/news 15 — tampilkan N berita terbaru (default 10)\n"
     "/digest — ringkasan berita hari ini\n"
+    "/testnews — kirim contoh notifikasi berita asli\n"
     "/list — lihat pengaturanmu\n"
     "/link — hubungkan watchlist dari app\n"
     "/stop — berhenti total\n\n"
@@ -134,6 +135,19 @@ def _matches(sub: dict, item: News) -> bool:
         return True
     keywords = sub.get("keywords") or []
     return any(kw in hay for kw in keywords) if keywords else False
+
+
+def _format_alert_dict(item: dict) -> str:
+    """Single-item alert format from a DB news row (same look as live alerts)."""
+    tickers = item.get("tickers") or []
+    head = ", ".join(tickers) if tickers else item["source"]
+    icon = "📈" if tickers else "📰"
+    lines = [f"{icon} <b>{html.escape(head)}</b>", html.escape(item["title"])]
+    if tickers:
+        lines.append(f"<i>{html.escape(item['source'])}</i>")
+    if item.get("url"):
+        lines.append(item["url"])
+    return "\n".join(lines)
 
 
 def _matches_dict(sub: dict, item: dict) -> bool:
@@ -325,6 +339,19 @@ async def _handle_command(chat_id: str, text: str) -> None:
             )
         elif cmd == "test":
             reply = "🔔 Tes notifikasi berhasil! Bot aktif dan terhubung. ✅"
+        elif cmd == "testnews":
+            sub = await repo.get_subscriber(session, chat_id) or {"all_news": True}
+            recent = await repo.latest_news(session, limit=50)
+            matched = [it for it in recent if _matches_dict(sub, it)][:3]
+            if not matched:
+                reply = (
+                    "Belum ada berita yang cocok dengan pengaturanmu. "
+                    "Coba /all on, atau /watch BBCA."
+                )
+            else:
+                for it in matched:
+                    await send_message(chat_id, _format_alert_dict(it))
+                reply = f"✅ {len(matched)} contoh berita dikirim (format notifikasi asli)."
         elif cmd == "stop":
             await repo.remove_subscriber(session, chat_id)
             reply = "🛑 Berhenti. Kamu tidak akan menerima notifikasi lagi."
