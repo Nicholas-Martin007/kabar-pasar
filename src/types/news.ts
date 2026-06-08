@@ -6,6 +6,10 @@ export type NewsSource =
   | 'Bloomberg Technoz'
   | 'Yahoo Finance'
   | 'CNBC Global'
+  | 'Katadata'
+  | 'Antara'
+  | 'Liputan6'
+  | 'Investor.id'
   | 'BEI'
   | 'IR Emiten';
 

@@ -33,6 +33,10 @@ const P = {
   amber400:  '#F5A623', // ~9.6:1 — Bloomberg Technoz
   violet400: '#A78BFA', // ~7.2:1 — Yahoo Finance
   emerald400:'#34D399', // ~9.8:1 — CNBC Global
+  pink400:   '#F472B6', // ~7.0:1 — Katadata
+  orange400: '#FB923C', // ~8.4:1 — Antara
+  lime400:   '#A3E635', // ~12:1  — Liputan6
+  cyan400:   '#22D3EE', // ~10:1  — Investor.id
 } as const;
 
 export const Colors = {
@@ -71,6 +75,10 @@ export const Colors = {
     'Bloomberg Technoz': P.amber400, // ~9.6:1 ✓
     'Yahoo Finance':    P.violet400, // ~7.2:1 ✓
     'CNBC Global':      P.emerald400, // ~9.8:1 ✓
+    Katadata:           P.pink400,   // ~7.0:1 ✓
+    Antara:             P.orange400, // ~8.4:1 ✓
+    Liputan6:           P.lime400,   // ~12:1 ✓
+    'Investor.id':      P.cyan400,   // ~10:1 ✓
     BEI:                P.teal400,   // 8.5:1 ✓
     'IR Emiten':        P.slate300,  // 6.3:1 ✓ — neutral for corporate IR
   },

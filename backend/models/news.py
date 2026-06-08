@@ -13,6 +13,10 @@ class NewsSource(str, Enum):
     BLOOMBERG_TECHNOZ = "Bloomberg Technoz"
     YAHOO_FINANCE     = "Yahoo Finance"
     CNBC_GLOBAL       = "CNBC Global"
+    KATADATA          = "Katadata"
+    ANTARA            = "Antara"
+    LIPUTAN6          = "Liputan6"
+    INVESTOR_ID       = "Investor.id"
     BEI               = "BEI"
     IR_EMITEN         = "IR Emiten"
 

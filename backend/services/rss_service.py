@@ -13,13 +13,17 @@ from typing import Callable, Coroutine, List
 
 from models.news import News
 from services.sources import (
+    antara,
     bei,
     bisnis_indonesia,
     bloomberg_technoz,
     cnbc_global,
     cnbc_indonesia,
     detik,
+    investor_id,
+    katadata,
     kontan,
+    liputan6,
     yahoo_finance,
 )
 
@@ -35,6 +39,10 @@ SOURCES: List[tuple[str, Callable[[], Coroutine]]] = [
     ("bloomberg_technoz", bloomberg_technoz.fetch),
     ("yahoo_finance",    yahoo_finance.fetch),
     ("cnbc_global",      cnbc_global.fetch),
+    ("katadata",         katadata.fetch),
+    ("antara",           antara.fetch),
+    ("liputan6",         liputan6.fetch),
+    ("investor_id",      investor_id.fetch),
 ]
 
 
