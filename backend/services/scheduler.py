@@ -42,9 +42,10 @@ async def refresh_news_job() -> Dict[str, int]:
 
     async with get_session() as session:
         new_items = await upsert_news_items(session, items)
-        # Cost control: only summarise the freshest _AI_BATCH items per cycle
-        to_summarise = new_items[:_AI_BATCH]
-        stats = await summarize_batch(session, to_summarise)
+
+    # Cost control: only summarise the freshest _AI_BATCH items per cycle.
+    # summarize_batch manages its own per-task sessions.
+    stats = await summarize_batch(new_items[:_AI_BATCH])
 
     # Push Telegram alerts for new watchlist-matching items (no-op if disabled).
     alerts_sent = await dispatch_alerts(new_items)

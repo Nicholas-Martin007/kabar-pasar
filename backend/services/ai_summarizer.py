@@ -14,6 +14,7 @@ from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.repository import get_cached_summary, save_summary
+from db.session import get_session
 from models.news import News
 
 logger = logging.getLogger(__name__)
@@ -153,10 +154,12 @@ async def summarize_and_persist(
 
 
 async def summarize_batch(
-    session: AsyncSession, items: List[News], concurrency: int = 5
+    items: List[News], concurrency: int = 5
 ) -> Dict[str, int]:
     """
     Summarise a batch of items in parallel (bounded concurrency).
+    Each task uses its OWN DB session — AsyncSession is not safe to share across
+    concurrent coroutines (causes "transaction is closed" errors).
     Returns counts: {summarised, skipped, errors}.
     """
     if not items:
@@ -168,18 +171,20 @@ async def summarize_batch(
     async def _one(item: News) -> None:
         async with sem:
             try:
-                cached = await get_cached_summary(session, item.id)
+                async with get_session() as session:
+                    cached = await get_cached_summary(session, item.id)
                 if cached is not None:
                     stats["skipped"] += 1
                     return
                 result = await _call_claude(item)
-                await save_summary(
-                    session=session,
-                    news_id=item.id,
-                    summary=result["summary"],
-                    importance=result["importance"],
-                    impact=result["impact"],
-                )
+                async with get_session() as session:
+                    await save_summary(
+                        session=session,
+                        news_id=item.id,
+                        summary=result["summary"],
+                        importance=result["importance"],
+                        impact=result["impact"],
+                    )
                 if result["summary"]:
                     stats["summarised"] += 1
                 else:
