@@ -113,6 +113,8 @@ VALID_TICKERS: Set[str] = {
     "BFIN", "ADMF", "CFIN", "WOMF",
     # Large / popular new listings
     "BREN", "CUAN", "RATU",
+    # Bakrie group & other liquid names
+    "DEWA", "BNBR", "ELTY", "VKTR", "BUKK", "MBSS", "BIPI",
 }
 VALID_TICKERS |= set(TICKER_KEYWORDS.keys())
 

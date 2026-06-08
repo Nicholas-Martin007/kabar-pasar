@@ -193,16 +193,20 @@ async def send_test_news() -> int:
         recent = await repo.latest_news(session, limit=50)
     if not subs:
         return 0
-    if not recent:
-        for sub in subs:
-            await send_message(sub["chat_id"], "ℹ️ Belum ada berita di cache. Tunggu refresh.")
-        return len(subs)
-    item = recent[_test_news_idx % len(recent)]
-    _test_news_idx += 1
     sent = 0
     for sub in subs:
+        # Respect the subscriber's filter (all-news/mute or watchlist/topics).
+        pool = [it for it in recent if _matches_dict(sub, it)]
+        if not pool:
+            await send_message(
+                sub["chat_id"],
+                "ℹ️ Belum ada berita yang cocok dengan filtermu (coba /all on).",
+            )
+            continue
+        item = pool[_test_news_idx % len(pool)]
         await send_message(sub["chat_id"], _format_alert_dict(item))
         sent += 1
+    _test_news_idx += 1
     return sent
 
 
