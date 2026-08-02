@@ -1,17 +1,42 @@
+# ── Web framework / real-time dashboard ──────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-feedparser>=6.0.11
+# Explicit, not just transitive via uvicorn[standard] — we import it directly
+# for the real-time dashboard socket.
+websockets>=12.0
 pydantic>=2.7.0
 python-dotenv>=1.0.1
+
+# ── Scraping ─────────────────────────────────────────────────────────────────
 httpx>=0.27.0
+feedparser>=6.0.11
+beautifulsoup4>=4.12.0
+# Headless browser for JS-rendered sources. Requires a one-time browser
+# download: `python -m playwright install chromium`
+playwright>=1.44.0
+
+# ── Financial data & charting (ta_engine) ────────────────────────────────────
+yfinance>=0.2.40
+pandas>=2.2.0
+ta>=0.11.0
+matplotlib>=3.8.0
+mplfinance>=0.12.10b0
+
+# ── AI models ────────────────────────────────────────────────────────────────
+# Free/local inference. `anthropic` retained for the existing (dormant)
+# summariser path — ANTHROPIC_API_KEY is intentionally unset.
+groq>=0.9.0
+ollama>=0.3.0
 anthropic>=0.28.0
 
-# HTML scraping (BEI announcements)
-beautifulsoup4>=4.12.0
+# ── Telegram delivery ────────────────────────────────────────────────────────
+# NOTE: telegram_bot/ currently talks to the raw Bot API over httpx. This
+# library is installed for the planned migration; it is not yet imported.
+python-telegram-bot>=21.0
 
-# Persistence (SQLite default, PostgreSQL swap via DATABASE_URL)
+# ── Persistence (SQLite default, PostgreSQL swap via DATABASE_URL) ───────────
 sqlalchemy[asyncio]>=2.0.30
 aiosqlite>=0.20.0
 
-# Scheduled background refresh
+# ── Scheduled background refresh ─────────────────────────────────────────────
 apscheduler>=3.10.4

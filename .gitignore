@@ -43,3 +43,12 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Generated chart images (rendered at runtime by ta_engine)
+/static/charts/*
+!/static/charts/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
