@@ -40,9 +40,9 @@ yarn-error.*
 
 app-example
 
-# generated native folders
-/ios
-/android
+# generated native folders (Expo app now lives in frontend/)
+/frontend/ios
+/frontend/android
 
 # Generated chart images (rendered at runtime by ta_engine)
 /static/charts/*
