@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from services.market_service import (
+from backend.services.market_service import (
     IHSG_SYMBOL,
     RANGE_INTERVAL,
     fetch_chart_data,

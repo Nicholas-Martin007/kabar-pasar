@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.news import News, NewsCategory, NewsImportance, NewsSource
+from backend.models.news import News, NewsCategory, NewsImportance, NewsSource
 
 from .models import AISummaryRow, NewsRow, TelegramSubscriber
 

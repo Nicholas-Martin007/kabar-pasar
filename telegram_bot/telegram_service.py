@@ -21,9 +21,9 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 
-from db import repository as repo
-from db.session import get_session
-from models.news import News
+from backend.db import repository as repo
+from backend.db.session import get_session
+from backend.models.news import News
 
 logger = logging.getLogger(__name__)
 

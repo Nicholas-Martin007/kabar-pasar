@@ -17,8 +17,8 @@ from typing import List
 import feedparser
 import httpx
 
-from models.news import News, NewsCategory, NewsImportance, NewsSource
-from services.ticker_service import detect_tickers
+from backend.models.news import News, NewsCategory, NewsImportance, NewsSource
+from backend.services.ticker_service import detect_tickers
 
 logger = logging.getLogger(__name__)
 

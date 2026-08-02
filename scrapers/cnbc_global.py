@@ -3,7 +3,7 @@
 import asyncio
 from typing import List
 
-from models.news import News, NewsSource
+from backend.models.news import News, NewsSource
 
 from .base import fetch_rss
 

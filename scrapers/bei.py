@@ -20,7 +20,7 @@ from typing import List
 import httpx
 from bs4 import BeautifulSoup
 
-from models.news import News, NewsCategory, NewsImportance, NewsSource
+from backend.models.news import News, NewsCategory, NewsImportance, NewsSource
 
 from .base import stable_id
 

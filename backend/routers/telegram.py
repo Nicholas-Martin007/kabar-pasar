@@ -7,9 +7,9 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from db import repository as repo
-from db.session import get_session
-from services.telegram_service import consume_link_code, is_enabled
+from backend.db import repository as repo
+from backend.db.session import get_session
+from telegram_bot.telegram_service import consume_link_code, is_enabled
 
 logger = logging.getLogger(__name__)
 

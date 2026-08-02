@@ -2,7 +2,7 @@
 News aggregator: fan-out to every registered source in parallel, then dedupe.
 
 Adding a new source:
-  1. Drop a module in `services/sources/` exposing `async fetch() -> List[News]`.
+  1. Drop a module in `scrapers/` exposing `async fetch() -> List[News]`.
   2. Import + append it to SOURCES below.
 """
 
@@ -11,8 +11,8 @@ import logging
 import re
 from typing import Callable, Coroutine, List
 
-from models.news import News
-from services.sources import (
+from backend.models.news import News
+from . import (
     antara,
     bei,
     bisnis_indonesia,

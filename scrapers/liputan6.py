@@ -1,21 +1,21 @@
-"""Antara — Indonesian national news agency (economy + latest)."""
+"""Liputan6 — Indonesian business & stock-market news."""
 
 import asyncio
 from typing import List
 
-from models.news import News, NewsSource
+from backend.models.news import News, NewsSource
 
 from .base import fetch_rss
 
 FEEDS = [
-    "https://www.antaranews.com/rss/ekonomi.xml",
-    "https://www.antaranews.com/rss/terkini.xml",
+    "https://feed.liputan6.com/rss/bisnis",
+    "https://feed.liputan6.com/rss/saham",
 ]
 
 
 async def fetch() -> List[News]:
     results = await asyncio.gather(
-        *[fetch_rss(NewsSource.ANTARA, url) for url in FEEDS],
+        *[fetch_rss(NewsSource.LIPUTAN6, url) for url in FEEDS],
         return_exceptions=True,
     )
     out: List[News] = []

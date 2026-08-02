@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Optional
 from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.repository import get_cached_summary, save_summary
-from db.session import get_session
-from models.news import News
+from backend.db.repository import get_cached_summary, save_summary
+from backend.db.session import get_session
+from backend.models.news import News
 
 logger = logging.getLogger(__name__)
 

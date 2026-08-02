@@ -10,10 +10,10 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from db.repository import count_news, query_news
-from db.session import get_session
-from models.news import News, NewsImportance, NewsSource
-from services.scheduler import refresh_news_job
+from backend.db.repository import count_news, query_news
+from backend.db.session import get_session
+from backend.models.news import News, NewsImportance, NewsSource
+from backend.services.scheduler import refresh_news_job
 
 logger = logging.getLogger(__name__)
 

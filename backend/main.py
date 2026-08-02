@@ -2,21 +2,32 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Dict
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-from db.session import dispose as db_dispose
-from db.session import init_db
-from routers import market as market_router
-from routers import news as news_router
-from routers import telegram as telegram_router
-from services.scheduler import refresh_news_job, shutdown_scheduler, start_scheduler
-from services.telegram_service import poll_updates_loop
+# Must run BEFORE the project imports below: db.session reads DATABASE_URL at
+# module scope, so a late load_dotenv() would silently ignore it. The absolute
+# path also makes this CWD-independent — the app is now launched from the repo
+# root (`uvicorn backend.main:app`), where a bare load_dotenv() would pick up
+# the root .env (Expo vars) instead of backend/.env.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-load_dotenv()
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from backend.db.session import dispose as db_dispose  # noqa: E402
+from backend.db.session import init_db  # noqa: E402
+from backend.routers import market as market_router  # noqa: E402
+from backend.routers import news as news_router  # noqa: E402
+from backend.routers import telegram as telegram_router  # noqa: E402
+from backend.services.scheduler import (  # noqa: E402
+    refresh_news_job,
+    shutdown_scheduler,
+    start_scheduler,
+)
+from telegram_bot.telegram_service import poll_updates_loop  # noqa: E402
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),

@@ -12,11 +12,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from db.repository import upsert_news_items
-from db.session import get_session
-from services.ai_summarizer import summarize_batch
-from services.rss_service import fetch_all_news
-from services.telegram_service import dispatch_alerts, dispatch_digest, send_test_news
+from backend.db.repository import upsert_news_items
+from backend.db.session import get_session
+from ai_engine.ai_summarizer import summarize_batch
+from scrapers.rss_service import fetch_all_news
+from telegram_bot.telegram_service import dispatch_alerts, dispatch_digest, send_test_news
 
 logger = logging.getLogger(__name__)
 

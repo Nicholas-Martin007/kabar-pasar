@@ -15,8 +15,8 @@ from typing import List
 import httpx
 from bs4 import BeautifulSoup
 
-from models.news import News, NewsSource
-from services.ticker_service import detect_tickers
+from backend.models.news import News, NewsSource
+from backend.services.ticker_service import detect_tickers
 
 from .base import guess_category, score_importance, stable_id
 
