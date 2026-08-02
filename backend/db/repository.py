@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.models.news import News, NewsCategory, NewsImportance, NewsSource
 
-from .models import AISummaryRow, NewsRow, TelegramSubscriber
+from .models import AISummaryRow, CommodityPriceRow, NewsRow, TelegramSubscriber
 
 logger = logging.getLogger(__name__)
 
@@ -430,3 +430,77 @@ async def latest_news_for_tickers(
             if len(out) >= limit:
                 break
     return out
+
+
+# ── Commodity prices ─────────────────────────────────────────────────────────
+
+async def insert_commodity_prices(
+    session: AsyncSession, quotes: List[Dict[str, Any]]
+) -> int:
+    """
+    Append timestamped price observations. Callers pass only prices that
+    actually moved — this is an append-only history table, not an upsert.
+    """
+    if not quotes:
+        return 0
+    for q in quotes:
+        session.add(CommodityPriceRow(
+            symbol=q["symbol"],
+            name=q["name"],
+            price=q["price"],
+            currency=q.get("currency", "USD"),
+            change=q.get("change"),
+            change_percent=q.get("changePercent"),
+            is_proxy=bool(q.get("isProxy", False)),
+        ))
+    await session.commit()
+    logger.debug("repo.commodity_insert count=%d", len(quotes))
+    return len(quotes)
+
+
+async def latest_commodity_prices(session: AsyncSession) -> List[Dict[str, Any]]:
+    """Most recent observation per symbol."""
+    rows = (
+        await session.execute(
+            select(CommodityPriceRow).order_by(CommodityPriceRow.recorded_at.desc()).limit(500)
+        )
+    ).scalars().all()
+
+    seen: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        if r.symbol in seen:
+            continue
+        seen[r.symbol] = {
+            "symbol": r.symbol,
+            "name": r.name,
+            "price": r.price,
+            "currency": r.currency,
+            "change": r.change,
+            "changePercent": r.change_percent,
+            "isProxy": r.is_proxy,
+            "recordedAt": r.recorded_at.isoformat() if r.recorded_at else None,
+        }
+    return list(seen.values())
+
+
+async def commodity_history(
+    session: AsyncSession, symbol: str, limit: int = 200
+) -> List[Dict[str, Any]]:
+    """Timestamped price history for one symbol, newest first."""
+    rows = (
+        await session.execute(
+            select(CommodityPriceRow)
+            .where(CommodityPriceRow.symbol == symbol)
+            .order_by(CommodityPriceRow.recorded_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "price": r.price,
+            "change": r.change,
+            "changePercent": r.change_percent,
+            "recordedAt": r.recorded_at.isoformat() if r.recorded_at else None,
+        }
+        for r in rows
+    ]

@@ -27,6 +27,10 @@ from backend.services.scheduler import (  # noqa: E402
     shutdown_scheduler,
     start_scheduler,
 )
+from backend.routers import commodities as commodities_router  # noqa: E402
+from backend.routers import stream as stream_router  # noqa: E402
+from scrapers.commodity_tracker import poll_loop as commodity_poll_loop  # noqa: E402
+from scrapers.news_scraper import poll_loop as news_poll_loop  # noqa: E402
 from telegram_bot.telegram_service import poll_updates_loop  # noqa: E402
 
 logging.basicConfig(
@@ -43,14 +47,24 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     # Kick off an initial refresh in the background — don't block server startup
     asyncio.create_task(_initial_refresh())
-    # Telegram command poller (no-op if TELEGRAM_BOT_TOKEN unset)
-    telegram_task = asyncio.create_task(poll_updates_loop())
-    logger.info("app.startup_complete")
+
+    # Long-running pollers. All are cancelled on shutdown; each is individually
+    # disable-able by env so one misbehaving source can be turned off without
+    # taking the API down.
+    background = [
+        asyncio.create_task(poll_updates_loop(), name="telegram"),
+        asyncio.create_task(news_poll_loop(), name="news_fastpoll"),
+        asyncio.create_task(commodity_poll_loop(), name="commodity"),
+    ]
+    logger.info("app.startup_complete background_tasks=%d", len(background))
     try:
         yield
     finally:
         # Shutdown
-        telegram_task.cancel()
+        for task in background:
+            task.cancel()
+        # Let each task observe the cancellation and run its finally blocks.
+        await asyncio.gather(*background, return_exceptions=True)
         shutdown_scheduler()
         await db_dispose()
         logger.info("app.shutdown_complete")
@@ -89,6 +103,8 @@ app.add_middleware(
 app.include_router(news_router.router)
 app.include_router(market_router.router)
 app.include_router(telegram_router.router)
+app.include_router(commodities_router.router)
+app.include_router(stream_router.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -79,10 +79,49 @@ Other packages import *from* `backend` (`backend.models.news`, `backend.db`,
   Backward-compatible / non-breaking changes only.
 - iOS Live Activities need a Mac or paid Apple Developer account → parked.
 
+## Live ingestion pipeline (added 2026-08-02)
+- **`scrapers/news_scraper.py`** — fast lane over Kontan / CNBC Indonesia /
+  Bloomberg Technoz. Conditional GET (ETag/Last-Modified), obeys the
+  publisher's `Cache-Control: max-age` as an interval floor, honours
+  `Retry-After` on 429/503, exponential backoff + jitter to a 15-min ceiling.
+  **Deliberately no user-agent rotation** — one honest UA; rotating identity to
+  slip a rate limit is what gets an aggregator's whole IP range blocked.
+  Env: `FAST_POLL_SECONDS` (default 30, floor 5), `FAST_POLL_ENABLED=0` to stop.
+- **`scrapers/commodity_tracker.py`** — Gold `GC=F`, WTI `CL=F`, Brent `BZ=F`
+  are real futures. **Coal and nickel have no free Yahoo futures contract**
+  (verified: `MTF=F`, `LFF=F`, `ATW=F`, `NID=F`, `NI=F`, `JJN` all return no
+  data), so they are tracked as *equity proxies* — ADRO/PTBA/ITMG and
+  INCO/ANTM — flagged `isProxy: true`. **The UI must not render a proxy as a
+  spot price**; it is a miner's IDR share price carrying earnings/FX/IDX-hours
+  effects. Only writes on an actual price move. Env:
+  `COMMODITY_POLL_SECONDS` (default 30), `COMMODITY_POLL_ENABLED=0`.
+- **Streaming** — `GET /stream/ws` (WebSocket, primary), `GET /stream/sse`
+  (fallback, `curl`-friendly), `GET /stream/status` (subscriber count).
+  Envelope: `{type: news|commodity|heartbeat, ts, data}`. Bounded 100-event
+  per-client queue with drop-oldest, so a stalled phone cannot backpressure the
+  scrapers. **Single-process only** — multiple uvicorn workers each get their
+  own bus, so a client on worker A misses events from worker B. Multi-worker
+  needs Redis pub/sub.
+- **Dedup is unchanged**: `stable_id()` = SHA-1(guid or url)[:12] as the news
+  PK. Do *not* switch to MD5-of-URL — it changes every id, so the whole cache
+  re-inserts as duplicates and every subscriber gets re-alerted for old news.
+- New endpoints: `GET /commodities`, `GET /commodities/{symbol}/history`.
+
 ## Known limitations / TODO
 - **`ta_engine/` is an empty skeleton** — `yfinance`/`pandas`/`ta`/`mplfinance`
   are installed but nothing computes indicators or renders charts yet, and
   `telegram_bot` has no `sendPhoto`, so charts cannot be delivered.
+- **`commodity_price` grows unbounded** — no retention/pruning job yet. Only
+  price *changes* are stored, which bounds it a lot, but a busy day still adds
+  thousands of rows. Add a pruning job before this runs for weeks.
+- **The frontend does not consume the stream yet** — `/stream/ws` is live and
+  verified server-side, but no React Native client subscribes to it. The app
+  still polls via React Query.
+- **EmitenNews not added** — site has no RSS feed (all common paths 500, none
+  advertised in HTML); would need an HTML scraper.
+- Several pre-existing sources are failing and predate this work:
+  Detik (empty error), Bisnis Indonesia (403), BEI/IDX (403 on both the API and
+  the HTML fallback).
 - **`playwright` + chromium installed but unused** — no scraper uses it; the
   two HTML sources still use httpx + BeautifulSoup.
 - **`groq` / `ollama` installed but unwired** — `ai_engine` still targets

@@ -14,6 +14,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db.repository import upsert_news_items
 from backend.db.session import get_session
+from backend.services.events import bus
 from ai_engine.ai_summarizer import summarize_batch
 from scrapers.rss_service import fetch_all_news
 from telegram_bot.telegram_service import dispatch_alerts, dispatch_digest, send_test_news
@@ -45,6 +46,12 @@ async def refresh_news_job() -> Dict[str, int]:
 
     async with get_session() as session:
         new_items = await upsert_news_items(session, items)
+
+    # Push to live clients immediately, before the slower AI/Telegram steps —
+    # the fast poller covers only 3 feeds, so this is how the other 9 sources
+    # reach a connected app without a reload.
+    if new_items:
+        bus.publish_news([n.model_dump(by_alias=True, mode="json") for n in new_items])
 
     # Cost control: only summarise the freshest _AI_BATCH items per cycle.
     # summarize_batch manages its own per-task sessions.

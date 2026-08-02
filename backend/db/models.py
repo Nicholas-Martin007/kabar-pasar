@@ -8,7 +8,7 @@ doesn't touch the news row (and vice versa). One-to-one by news_id.
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -59,6 +59,37 @@ class TelegramSubscriber(Base):
     link_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CommodityPriceRow(Base):
+    """
+    Timestamped commodity price history, one row per observed price change.
+
+    The tracker only writes when the price actually moves, so an overnight
+    market that is closed costs nothing instead of storing the same number
+    every polling interval.
+
+    `is_proxy` matters for correctness, not bookkeeping: Yahoo has no free
+    futures contract for coal or nickel, so those entries are *equity proxies*
+    (Indonesian miners) — a mining company's share price, not a commodity
+    price. Anything rendering this table must surface that distinction rather
+    than presenting a proxy as a spot price.
+    """
+
+    __tablename__ = "commodity_price"
+    __table_args__ = (
+        Index("ix_commodity_symbol_recorded", "symbol", "recorded_at"),
+    )
+
+    id:             Mapped[int]      = mapped_column(primary_key=True, autoincrement=True)
+    symbol:         Mapped[str]      = mapped_column(String(32), nullable=False, index=True)
+    name:           Mapped[str]      = mapped_column(String(64), nullable=False)
+    price:          Mapped[float]    = mapped_column(Float, nullable=False)
+    currency:       Mapped[str]      = mapped_column(String(8), default="USD")
+    change:         Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    change_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    is_proxy:       Mapped[bool]     = mapped_column(default=False)
+    recorded_at:    Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
 class AISummaryRow(Base):

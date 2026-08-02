@@ -112,23 +112,16 @@ def score_importance(title: str, body: str = "") -> NewsImportance:
     return NewsImportance.MEDIUM
 
 
-async def fetch_rss(source: NewsSource, url: str) -> List[News]:
-    """Fetch one RSS feed and return parsed News items."""
-    try:
-        async with httpx.AsyncClient(
-            timeout=_FEED_TIMEOUT,
-            follow_redirects=True,
-            headers={"User-Agent": _USER_AGENT},
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            # feedparser.parse is CPU-bound; run in thread to keep loop free
-            feed = await asyncio.to_thread(feedparser.parse, resp.content)
-    except Exception as exc:
-        logger.warning(
-            "rss.fetch_failed source=%s url=%s error=%s", source.value, url, exc
-        )
-        return []
+async def parse_feed_bytes(source: NewsSource, content: bytes) -> List[News]:
+    """
+    Parse raw feed bytes into News items.
+
+    Split out of `fetch_rss` so callers that do their own HTTP (e.g. the
+    conditional-GET fast poller in `news_scraper`) can reuse the exact same
+    parsing, ticker detection and scoring instead of duplicating it.
+    """
+    # feedparser.parse is CPU-bound; run in thread to keep loop free
+    feed = await asyncio.to_thread(feedparser.parse, content)
 
     if feed.bozo and not feed.entries:
         logger.warning(
@@ -158,6 +151,25 @@ async def fetch_rss(source: NewsSource, url: str) -> List[News]:
                 url=link or None,
             )
         )
+    return items
 
+
+async def fetch_rss(source: NewsSource, url: str) -> List[News]:
+    """Fetch one RSS feed and return parsed News items."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=_FEED_TIMEOUT,
+            follow_redirects=True,
+            headers={"User-Agent": _USER_AGENT},
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+    except Exception as exc:
+        logger.warning(
+            "rss.fetch_failed source=%s url=%s error=%s", source.value, url, exc
+        )
+        return []
+
+    items = await parse_feed_bytes(source, resp.content)
     logger.info("rss.fetched source=%s count=%d", source.value, len(items))
     return items
