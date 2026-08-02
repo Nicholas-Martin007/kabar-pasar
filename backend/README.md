@@ -2,31 +2,41 @@
 
 FastAPI service for RSS aggregation and news processing.
 
+> Scraping lives in `../scrapers/`, summarisation in `../ai_engine/`, and
+> Telegram delivery in `../telegram_bot/`. This package holds the HTTP layer,
+> the database, and the shared `News` contract those packages import.
+
 ## Setup
 
-```bash
-cd backend
+Run from the **repository root** — `backend` is now an importable package, so
+the root must be the working directory.
 
+```bash
 # Create virtual environment
-python -m venv .venv
+python -m venv backend/.venv
 
 # Activate (Windows PowerShell)
-.venv\Scripts\Activate.ps1
+backend\.venv\Scripts\Activate.ps1
 
 # Activate (macOS / Linux)
-source .venv/bin/activate
+source backend/.venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
+
+# One-time browser download for the Playwright-based sources
+python -m playwright install chromium
 
 # Copy env file
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
 ## Run
 
+From the repository root:
+
 ```bash
-uvicorn main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8000
 ```
 
 API docs available at: http://localhost:8000/docs

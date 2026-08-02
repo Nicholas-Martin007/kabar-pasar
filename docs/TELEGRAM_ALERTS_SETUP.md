@@ -19,8 +19,8 @@ Apple account, no per-message cost. Works while the app is closed.
    ```
 3. Restart the backend:
    ```
-   cd backend
-   .venv/Scripts/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+   # from the repo root
+   backend/.venv/Scripts/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
    ```
    You should see `telegram.poller.started` in the logs (instead of
    `telegram.disabled`).

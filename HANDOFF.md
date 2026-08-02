@@ -16,13 +16,15 @@ Live Activity scaffold.
 ## Environment gotchas (important)
 - **Windows + PowerShell**, project lives in **OneDrive** → `node_modules`
   corrupts (files silently vanish). Fix with **`npm ci`**, not `npm install`.
-- **Run the backend from the `backend/` folder:**
+  `node_modules` now lives in `frontend/`.
+- **Run the backend from the repo ROOT** (changed — it used to be `backend/`):
   ```powershell
-  cd backend
-  python -m uvicorn main:app --host 0.0.0.0 --port 8000
+  backend\.venv\Scripts\python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
   ```
-  venv is `backend/.venv` (activate it, or call `.\.venv\Scripts\python`).
-  Only one backend per port 8000 (`Errno 10048` = port already in use).
+  `scrapers/`, `ai_engine/`, `telegram_bot/` and `ta_engine/` are top-level
+  packages, so the repo root has to be on `sys.path`. venv is still
+  `backend/.venv`. Only one backend per port 8000 (`Errno 10048` = in use).
+- **Run the app from `frontend/`:** `cd frontend; npx expo start`.
 - A JSON formatter keeps reindenting `app.json`/`package.json` — harmless noise;
   `app.json` may show an uncommitted whitespace diff.
 - **`backend/.env`** (git-ignored) holds:
@@ -34,9 +36,24 @@ Live Activity scaffold.
   (user's LAN IP; a physical iPhone needs the LAN IP, not localhost).
 
 ## Verify workflow (no device builds possible — Windows, no Mac / Apple acct)
-- Frontend: `npx tsc --noEmit -p tsconfig.json` + `npx expo export -p ios --output-dir <temp>`.
-- Backend: `py_compile` each changed file; unit-test logic with small `asyncio` scripts.
+- Frontend (from `frontend/`): `npx tsc --noEmit -p tsconfig.json` +
+  `npx expo export -p ios --output-dir <temp>`.
+- Backend (from root): `python -m compileall -q backend scrapers ai_engine
+  telegram_bot ta_engine`, then boot uvicorn on a spare port and curl it.
+  **Booting the backend sends real Telegram messages** — `TEST_ALERT_SECONDS`
+  pings on an interval and a refresh dispatches alerts. Unset it before
+  long-running local tests.
 - Emoji in `print()` breaks the Windows cp1252 console — use `.encode('ascii','replace')`.
+
+## Project layout (restructured 2026-08-02)
+```
+backend/     FastAPI + db + shared News contract   scrapers/   12 sources + aggregator
+ai_engine/   summarisation (dormant)               telegram_bot/  delivery
+ta_engine/   indicators + charts — EMPTY SKELETON  static/charts/ generated PNGs
+frontend/    Expo app                              docs/
+```
+Other packages import *from* `backend` (`backend.models.news`, `backend.db`,
+`backend.services.ticker_service`); `backend` never imports them at module scope.
 
 ## What's built
 - Frontend↔backend via React Query; **live news + market data** (Yahoo `.JK`,
@@ -63,6 +80,20 @@ Live Activity scaffold.
 - iOS Live Activities need a Mac or paid Apple Developer account → parked.
 
 ## Known limitations / TODO
+- **`ta_engine/` is an empty skeleton** — `yfinance`/`pandas`/`ta`/`mplfinance`
+  are installed but nothing computes indicators or renders charts yet, and
+  `telegram_bot` has no `sendPhoto`, so charts cannot be delivered.
+- **`playwright` + chromium installed but unused** — no scraper uses it; the
+  two HTML sources still use httpx + BeautifulSoup.
+- **`groq` / `ollama` installed but unwired** — `ai_engine` still targets
+  Anthropic only, and that key is intentionally empty, so every refresh logs
+  `ai.call_failed ... ANTHROPIC_API_KEY is not set`. Switching to Groq/Ollama
+  would make summaries work for free.
+- **`python-telegram-bot` installed but unused** — the bot still talks to the
+  raw Bot API over httpx. Migration is optional, not started.
+- **Bot token leaks into logs**: httpx logs the full request URL at INFO,
+  which embeds `TELEGRAM_BOT_TOKEN`. Silence with
+  `logging.getLogger("httpx").setLevel(logging.WARNING)`.
 - AI summaries off (paid). Global (Yahoo/CNBC) headlines are English (no free translate).
 - Existing cached news is "medium" importance until the feed re-fetches (scorer
   runs at fetch time). Optional: delete `backend/data/kabar_pasar.db` once to re-score.

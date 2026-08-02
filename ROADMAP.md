@@ -21,7 +21,7 @@ iOS-first; backend FastAPI + Python).
 
 **Backend (FastAPI)**
 - Aggregasi RSS dari 5 sumber: BEI, Bisnis Indonesia, CNBC Indonesia, Detik,
-  Kontan (modular per-source di `services/sources/`)
+  Kontan (modular per-source di `scrapers/`)
 - Deteksi ticker otomatis dari teks berita
 - AI summarisation (Anthropic tool-use) — bullet ringkasan + 1-line impact
 - Persistensi ke SQLite (async SQLAlchemy); siap migrasi ke Postgres via

@@ -1,50 +1,71 @@
-# Welcome to your Expo app 👋
+# Kabar Pasar
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Real-time financial news intelligence for Indonesian retail investors.
+React Native / Expo app (iOS-first) backed by a Python FastAPI pipeline that
+aggregates IDX and global market news, scores it, and pushes what matters.
 
-## Get started
+## Repository layout
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+backend/          FastAPI app — routers, SQLAlchemy models/db, shared services
+  ├── routers/      /news, /market, /telegram endpoints
+  ├── db/           async SQLAlchemy engine, models, repository
+  ├── models/       Pydantic contract (News) shared across packages
+  └── services/     market_service, scheduler, ticker_service
+scrapers/         12 news sources (RSS + HTML) and the fan-out aggregator
+ta_engine/        technical indicators + chart rendering  (not yet implemented)
+ai_engine/        news summarisation / scoring
+telegram_bot/     Telegram delivery (commands, alerts, digests)
+static/charts/    generated chart images (git-ignored)
+frontend/         Expo / React Native app
+docs/             setup guides
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+`backend` is the shared kernel: the other top-level packages import
+`backend.models.news`, `backend.db` and `backend.services.ticker_service` from
+it. Nothing in `backend/` imports back into them at module scope.
 
-## Learn more
+## Run the backend
 
-To learn more about developing your project with Expo, look at the following resources:
+From the **repository root** (not `backend/`) — the packages above are
+top-level, so the root must be on `sys.path`:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```powershell
+backend\.venv\Scripts\python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
 
-## Join the community
+First-time setup:
 
-Join our community of developers creating universal apps.
+```powershell
+python -m venv backend\.venv
+backend\.venv\Scripts\python -m pip install -r backend\requirements.txt
+backend\.venv\Scripts\python -m playwright install chromium
+copy backend\.env.example backend\.env
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+API docs: http://localhost:8000/docs
+
+## Run the app
+
+From `frontend/`:
+
+```powershell
+cd frontend
+npm ci          # NOT npm install — see HANDOFF.md, OneDrive corrupts node_modules
+npx expo start
+```
+
+Copy `frontend/.env.example` to `frontend/.env` and set `EXPO_PUBLIC_API_URL`.
+A physical device needs your machine's LAN IP, not `localhost`.
+
+## Verify a change
+
+```powershell
+# backend
+backend\.venv\Scripts\python -m compileall -q backend scrapers ai_engine telegram_bot ta_engine
+
+# frontend
+cd frontend; npx tsc --noEmit -p tsconfig.json; npx expo export -p ios --output-dir $env:TEMP\exp
+```
+
+See [HANDOFF.md](HANDOFF.md) for environment gotchas and current status.
