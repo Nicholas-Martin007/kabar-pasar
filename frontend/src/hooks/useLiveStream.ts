@@ -6,6 +6,15 @@ import { STREAM_WS_URL, CommodityQuote } from '@/src/services/api';
 
 export type LiveStatus = 'connecting' | 'open' | 'offline';
 
+export interface LiveState {
+  status: LiveStatus;
+  /** Ids of items that arrived over the socket recently — drives the flash. */
+  freshIds: Set<string>;
+}
+
+// How long a pushed item keeps its "just arrived" highlight.
+const FRESH_TTL_MS = 8_000;
+
 /** Envelope shape broadcast by backend/routers/stream.py. */
 interface Envelope {
   type: 'news' | 'commodity' | 'heartbeat';
@@ -36,14 +45,18 @@ const MAX_BACKOFF_MS = 30_000;
  * Runs once at app root via LiveProvider. Returns the connection status for a
  * "live" indicator.
  */
-export function useLiveStream(): LiveStatus {
+export function useLiveStream(): LiveState {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<LiveStatus>('connecting');
+  const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let newsDebounce: ReturnType<typeof setTimeout> | null = null;
+    // Tracked so unmount can clear them — otherwise a pending expiry fires
+    // setState on a dead component.
+    const freshTimers = new Set<ReturnType<typeof setTimeout>>();
     let attempt = 0;
     // True while we intentionally don't want a socket (unmounted / backgrounded)
     // — stops onclose from scheduling a reconnect against our wishes.
@@ -64,6 +77,31 @@ export function useLiveStream(): LiveStatus {
           env.data as CommodityQuote[]
         );
       } else if (env.type === 'news') {
+        // Mark the pushed ids fresh so the feed can flash them, then expire the
+        // marks on a timer. Expiry is per-batch rather than a single global
+        // timeout, so a later push doesn't cut short an earlier item's flash.
+        const ids = Array.isArray(env.data)
+          ? (env.data as Array<{ id?: string }>)
+              .map((n) => n?.id)
+              .filter((id): id is string => typeof id === 'string')
+          : [];
+        if (ids.length) {
+          setFreshIds((prev) => {
+            const next = new Set(prev);
+            ids.forEach((id) => next.add(id));
+            return next;
+          });
+          const expiry = setTimeout(() => {
+            setFreshIds((prev) => {
+              const next = new Set(prev);
+              ids.forEach((id) => next.delete(id));
+              return next;
+            });
+            freshTimers.delete(expiry);
+          }, FRESH_TTL_MS);
+          freshTimers.add(expiry);
+        }
+
         if (newsDebounce) clearTimeout(newsDebounce);
         newsDebounce = setTimeout(() => {
           queryClient.invalidateQueries({ queryKey: ['news'] });
@@ -156,9 +194,11 @@ export function useLiveStream(): LiveStatus {
       suspended = true;
       sub.remove();
       if (newsDebounce) clearTimeout(newsDebounce);
+      freshTimers.forEach(clearTimeout);
+      freshTimers.clear();
       teardownSocket();
     };
   }, [queryClient]);
 
-  return status;
+  return { status, freshIds };
 }

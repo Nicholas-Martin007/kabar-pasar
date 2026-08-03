@@ -28,6 +28,7 @@ from backend.services.scheduler import (  # noqa: E402
     start_scheduler,
 )
 from backend.routers import charts as charts_router  # noqa: E402
+from backend.tasks import pool as task_pool  # noqa: E402
 from backend.routers import commodities as commodities_router  # noqa: E402
 from backend.routers import stream as stream_router  # noqa: E402
 from scrapers.commodity_tracker import poll_loop as commodity_poll_loop  # noqa: E402
@@ -45,6 +46,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
+    # Worker pool first: the scheduler and pollers below hand work to it, and a
+    # job submitted before the workers exist would sit in the queue unclaimed.
+    task_pool.start()
     start_scheduler()
     # Kick off an initial refresh in the background — don't block server startup
     asyncio.create_task(_initial_refresh())
@@ -67,6 +71,7 @@ async def lifespan(app: FastAPI):
         # Let each task observe the cancellation and run its finally blocks.
         await asyncio.gather(*background, return_exceptions=True)
         shutdown_scheduler()
+        await task_pool.stop()
         await db_dispose()
         logger.info("app.shutdown_complete")
 

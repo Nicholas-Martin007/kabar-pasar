@@ -19,7 +19,7 @@ import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useBookmarks } from '@/src/context/BookmarksContext';
-import { useLive } from '@/src/context/LiveContext';
+import { useLive, useLiveState } from '@/src/context/LiveContext';
 import { useRead } from '@/src/context/ReadContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
@@ -67,6 +67,7 @@ export default function HomeScreen() {
   const { items: watchlistItems } = useWatchlist();
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const { isRead, markRead } = useRead();
+  const { isFresh } = useLiveState();
   const { data: allNews, refetch } = useNewsFeed();
   const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const [greeting,      setGreeting]      = useState(getGreeting);
@@ -229,6 +230,7 @@ export default function HomeScreen() {
                 onBookmark={handleBookmark}
                 reaction={reactionMap?.get(item.id)}
                 reactionLoading={reactionsLoading}
+                isFresh={isFresh(item.id)}
               />
             ))
           )}

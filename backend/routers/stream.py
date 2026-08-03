@@ -151,7 +151,27 @@ async def stream_sse(request: Request) -> StreamingResponse:
     )
 
 
+@router.get("/api/v1/stream/news-and-prices")
+async def stream_news_and_prices(request: Request) -> StreamingResponse:
+    """
+    Versioned alias of `/stream/sse` — same bus, same envelopes.
+
+    A thin delegation rather than a second implementation: two copies of a
+    streaming generator drift, and a client on the stale one silently stops
+    seeing new event types.
+    """
+    return await stream_sse(request)
+
+
 @router.get("/stream/status")
 async def stream_status() -> dict:
-    """Connected-client count — for debugging that the bus is actually wired."""
-    return {"subscribers": bus.subscriber_count}
+    """
+    Connected clients plus background-queue depth.
+
+    Queue depth is the useful signal when the feed feels slow: a rising depth
+    means chart/screener work is arriving faster than the workers drain it, and
+    that backlog is what would eventually delay alerts.
+    """
+    from backend.tasks import pool as task_pool
+
+    return {"subscribers": bus.subscriber_count, "tasks": task_pool.stats()}

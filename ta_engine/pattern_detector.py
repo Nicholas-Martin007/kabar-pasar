@@ -981,3 +981,72 @@ def _dedupe(patterns: List[Pattern]) -> List[Pattern]:
         kept.append(p)
         seen_types.add(p.pattern_type)
     return kept
+
+
+# ── Compact summary adapter ──────────────────────────────────────────────────
+
+# Plot colours by direction, for callers that draw the trendlines themselves.
+_SUMMARY_COLORS = {"bullish": "cyan", "bearish": "magenta", "neutral": "violet"}
+
+
+def detect_pattern_summary(
+    df: pd.DataFrame,
+    min_quality: float = MIN_QUALITY,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Single best pattern in a flat, draw-ready dict.
+
+    A convenience wrapper over `detect_patterns` for callers that want one
+    answer and pre-formatted line coordinates rather than the full object list:
+
+        {
+          "detected": True,
+          "pattern_type": "Ascending Triangle",
+          "trendlines": [{"x1": ts, "y1": 4102.3, "x2": ts, "y2": 4498.2,
+                          "color": "cyan", "style": "--"}, ...],
+          "confidence": 0.87,
+        }
+
+    `confidence` is the same number as `quality_score` — geometric conformance,
+    NOT a probability of the pattern playing out. The key is named this way to
+    match the requested contract; the module docstring explains why the
+    distinction matters before showing it to anyone.
+
+    When nothing qualifies, returns `detected: False` with `pattern_type: None`
+    and an empty `trendlines` list, so a caller can fall straight through to
+    drawing plain support/resistance without special-casing.
+    """
+    patterns = detect_patterns(df, min_quality=min_quality, **kwargs)
+    if not patterns:
+        return {
+            "detected": False,
+            "pattern_type": None,
+            "trendlines": [],
+            "confidence": 0.0,
+        }
+
+    best = patterns[0]
+    color = _SUMMARY_COLORS.get(best.direction, "cyan")
+    trendlines = [
+        {
+            "x1": seg[0][0],
+            "y1": seg[0][1],
+            "x2": seg[-1][0],
+            "y2": seg[-1][1],
+            "color": color,
+            "style": "--",
+        }
+        for seg in best.lines
+    ]
+    return {
+        "detected": True,
+        "pattern_type": best.pattern_type,
+        "trendlines": trendlines,
+        "confidence": best.quality_score,
+        # Extras beyond the requested contract — additive, so a consumer reading
+        # only the four documented keys is unaffected.
+        "is_reversal": best.is_reversal,
+        "direction": best.direction,
+        "key_levels": best.key_levels,
+    }

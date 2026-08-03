@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 import { FeedHeader } from '@/components/feed-header';
 import { NewsCard } from '@/components/news-card';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useLiveState } from '@/src/context/LiveContext';
 import { useRead } from '@/src/context/ReadContext';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useIndex, useReactions } from '@/src/hooks/useMarket';
@@ -34,6 +35,7 @@ export default function BeritaScreen() {
   const { data: indexQuote, refetch: refetchIndex } = useIndex();
   const { isBookmarked, toggle: handleBookmark } = useBookmarks();
   const { isRead, markRead } = useRead();
+  const { isFresh } = useLiveState();
   const [activeFilter,  setActiveFilter]  = useState<FeedFilter>('all');
   const [refreshing,     setRefreshing]    = useState(false);
 
@@ -97,9 +99,13 @@ export default function BeritaScreen() {
         onBookmark={handleBookmark}
         reaction={reactionMap?.get(item.id)}
         reactionLoading={reactionsLoading}
+        isFresh={isFresh(item.id)}
       />
     ),
-    [isRead, isBookmarked, handlePress, handleBookmark, reactionMap, reactionsLoading]
+    // isFresh must stay in here: it changes identity when a live item arrives,
+    // and without it this callback keeps a stale closure and the flash never
+    // fires.
+    [isRead, isBookmarked, handlePress, handleBookmark, reactionMap, reactionsLoading, isFresh]
   );
 
   const renderHeader = useCallback(

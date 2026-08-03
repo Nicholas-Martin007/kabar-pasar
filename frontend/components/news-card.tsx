@@ -29,6 +29,8 @@ interface Props {
   reaction?: Reaction | null;
   /** Show a shimmer placeholder while the batched reaction is resolving. */
   reactionLoading?: boolean;
+  /** Item just arrived over the live stream — plays a one-shot flash. */
+  isFresh?: boolean;
 }
 
 /** Pulsing skeleton shown in place of the reaction badge while it loads. */
@@ -83,9 +85,24 @@ const SOURCE_COLOR: Record<NewsSource, string> = {
   'IR Emiten':        Colors.source['IR Emiten'],
 };
 
-export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark, reaction, reactionLoading }: Props) => {
+export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBookmark, reaction, reactionLoading, isFresh }: Props) => {
   const stripeColor = IMPORTANCE_COLOR[item.importance];
   const sourceColor = SOURCE_COLOR[item.source];
+
+  // One-shot arrival flash. An overlay's opacity is animated rather than the
+  // card's backgroundColor because colour interpolation can't run on the native
+  // driver — this way the flash stays smooth while the list is scrolling.
+  const flash = useRef(new Animated.Value(0)).current;
+  const flashed = useRef(false);
+  useEffect(() => {
+    if (!isFresh || flashed.current) return;
+    flashed.current = true;   // never replay for the same card
+    Animated.sequence([
+      Animated.timing(flash, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.delay(500),
+      Animated.timing(flash, { toValue: 0, duration: 1400, useNativeDriver: true }),
+    ]).start();
+  }, [isFresh, flash]);
 
   const reactionPct =
     reaction?.available && reaction.reactionPercent != null
@@ -110,6 +127,12 @@ export const NewsCard = React.memo(({ item, isRead, isBookmarked, onPress, onBoo
       onPress={handlePress}
       style={[styles.card, !isRead && styles.cardUnread]}
     >
+      {/* Arrival flash overlay. pointerEvents="none" so it never eats taps. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.flashOverlay, { opacity: flash }]}
+      />
+
       {/* Importance stripe — color encodes urgency level */}
       <View style={[styles.stripe, { backgroundColor: stripeColor }]} />
 
@@ -215,6 +238,13 @@ const styles = StyleSheet.create({
     marginVertical: Layout.cardMarginV,
     borderWidth: Border.width,
     borderColor: Colors.border.default,
+  },
+  // Sits above the card fill, below the content. The parent's overflow:'hidden'
+  // clips it to the rounded corners, so no separate radius is needed.
+  flashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.brand.accent,
+    zIndex: 1,
   },
   cardUnread: {
     backgroundColor: Colors.background.surfaceElevated,

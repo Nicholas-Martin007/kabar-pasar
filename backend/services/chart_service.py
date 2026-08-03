@@ -32,10 +32,18 @@ _TTL_SEC = 300
 
 _cache: Dict[str, Tuple[float, ChartResult]] = {}
 _locks: Dict[str, asyncio.Lock] = {}
-_locks_guard = asyncio.Lock()
+# Built lazily, never at module scope: on Python 3.9 an asyncio primitive binds
+# to whichever loop is current when it is constructed, and this module is
+# imported long before uvicorn starts the real loop. A guard bound to the wrong
+# loop deadlocks every chart request. Created on first use instead, from inside
+# the running loop.
+_locks_guard: Optional[asyncio.Lock] = None
 
 
 async def _lock_for(key: str) -> asyncio.Lock:
+    global _locks_guard
+    if _locks_guard is None:
+        _locks_guard = asyncio.Lock()
     async with _locks_guard:
         lock = _locks.get(key)
         if lock is None:
