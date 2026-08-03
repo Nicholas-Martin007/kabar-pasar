@@ -1,9 +1,26 @@
 """
 Technical-analysis engine.
 
-Computes indicators (via `ta`) over OHLCV frames (via `yfinance`) and renders
-candlestick chart images (via `mplfinance`) into `static/charts/` for delivery
-through the Telegram bot and the dashboard.
+Computes indicators over daily OHLCV (via `yfinance` + `ta`) and renders
+annotated candlestick charts (via `mplfinance`) into `static/charts/` for
+delivery through the Telegram bot and the dashboard.
 
-Not yet implemented — see HANDOFF.md "needs wiring up".
+    from ta_engine import generate_chart
+    result = generate_chart("BBCA.JK")
+
+Levels produced here are mechanical arithmetic on historical prices, not
+investment advice — see `chart_generator.DISCLAIMER`.
 """
+
+from .chart_generator import DISCLAIMER, ChartResult, generate_chart
+from .indicators import Level, add_indicators, build_levels, nearest_levels
+
+__all__ = [
+    "generate_chart",
+    "ChartResult",
+    "DISCLAIMER",
+    "Level",
+    "add_indicators",
+    "build_levels",
+    "nearest_levels",
+]

@@ -107,10 +107,42 @@ Other packages import *from* `backend` (`backend.models.news`, `backend.db`,
   re-inserts as duplicates and every subscriber gets re-alerted for old news.
 - New endpoints: `GET /commodities`, `GET /commodities/{symbol}/history`.
 
+## TA engine (added 2026-08-03)
+- **`ta_engine/chart_generator.py`** — `generate_chart("BBCA.JK")` returns a
+  `ChartResult` (chart_path, support, resistance, tp1, tp2, sl, rsi, atr,
+  ema20/50, risk_per_share, warnings) and writes
+  `static/charts/{TICKER}_daily.png`.
+- **`ta_engine/indicators.py`** — EMA20/50, RSI14, ATR14, fractal swing
+  detection, ATR-scaled level clustering, floor-trader pivots. Pure maths, no
+  I/O, unit-tested.
+- **Levels are LONG-biased**: SL below entry, targets above. Stop goes below
+  the nearest support (buffered 0.5×ATR) because that's what invalidates the
+  thesis; falls back to 1.5×ATR when no support exists. TP1 = 2R, TP2 = 3R, so
+  the 1:2 minimum holds by construction.
+- **`ChartResult.warnings` is not decoration** — it flags resistance sitting
+  below TP1, stops wider than 15% of price, missing structure, and levels finer
+  than the IDX tick size (fraksi harga). Surface them wherever the numbers go.
+- **These are not recommendations.** `ta_engine.DISCLAIMER` is burned into the
+  PNG and returned in the payload. Anything user-facing must keep it visible —
+  see the compliance note below.
+- Gotchas handled: `yf.download()` returns MultiIndex columns even for one
+  ticker (we use `Ticker().history()`); `ta`'s ATR emits **0.0** during warm-up
+  where RSI emits NaN (masked to NaN — a 0 ATR would collapse risk to nothing);
+  matplotlib forced to `Agg` and rendering serialised behind a lock because
+  pyplot's global state is not thread-safe under `asyncio.to_thread`.
+
+## Compliance note (TP/SL output)
+Showing TP/SL to Indonesian retail investors is closer to a trading signal than
+to news. Before this ships user-facing: keep the disclaimer visible, never word
+it as "buy/sell", and check OJK rules on investment advice plus App Store
+Guideline 3.2.1 (financial services). Not legal advice — worth a real check.
+
 ## Known limitations / TODO
-- **`ta_engine/` is an empty skeleton** — `yfinance`/`pandas`/`ta`/`mplfinance`
-  are installed but nothing computes indicators or renders charts yet, and
-  `telegram_bot` has no `sendPhoto`, so charts cannot be delivered.
+- **`ta_engine` is not wired to anything yet** — no API route calls
+  `generate_chart`, and `telegram_bot` still has no `sendPhoto`, so charts are
+  generated on demand from Python but not delivered anywhere.
+- **`static/charts/` is never pruned** — one PNG per ticker, overwritten each
+  run, but nothing deletes stale tickers.
 - **`commodity_price` grows unbounded** — no retention/pruning job yet. Only
   price *changes* are stored, which bounds it a lot, but a busy day still adds
   thousands of rows. Add a pruning job before this runs for weeks.
