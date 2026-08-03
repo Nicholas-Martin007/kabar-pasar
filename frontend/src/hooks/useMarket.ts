@@ -15,12 +15,20 @@ import {
 // Quotes refresh often during market hours; keep cache short.
 const STALE_MS = 30_000;
 
+// Stock quotes aren't pushed over the WebSocket (that stream carries only news
+// and commodities), so we poll to keep them "live". 30s matches the backend's
+// 60s Yahoo quote cache closely enough while staying polite. Foreground only —
+// no point burning battery/data polling Yahoo while the app is backgrounded.
+const LIVE_POLL_MS = 30_000;
+
 /** IHSG index quote. Returns undefined data while loading / on error. */
 export function useIndex() {
   return useQuery({
     queryKey: ['market', 'index'],
     queryFn: fetchIndex,
     staleTime: STALE_MS,
+    refetchInterval: LIVE_POLL_MS,
+    refetchIntervalInBackground: false,
     retry: 1,
   });
 }
@@ -32,6 +40,8 @@ export function useQuote(ticker?: string) {
     queryFn: () => fetchQuote(ticker!),
     enabled: !!ticker,
     staleTime: STALE_MS,
+    refetchInterval: LIVE_POLL_MS,
+    refetchIntervalInBackground: false,
     retry: 1,
   });
 }
@@ -44,6 +54,8 @@ export function useQuotes(tickers: string[]) {
     queryFn: () => fetchQuotes(tickers),
     enabled: tickers.length > 0,
     staleTime: STALE_MS,
+    refetchInterval: LIVE_POLL_MS,
+    refetchIntervalInBackground: false,
     retry: 1,
     select: (list): Map<string, Quote> => {
       const map = new Map<string, Quote>();

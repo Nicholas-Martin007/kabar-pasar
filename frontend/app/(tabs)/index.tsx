@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CommodityStrip } from '@/components/commodity-strip';
 import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { useNewsFeed } from '@/src/hooks/useNews';
@@ -18,6 +19,7 @@ import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
 import { ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useBookmarks } from '@/src/context/BookmarksContext';
+import { useLive } from '@/src/context/LiveContext';
 import { useRead } from '@/src/context/ReadContext';
 import { useWatchlist } from '@/src/context/WatchlistContext';
 import {
@@ -42,6 +44,21 @@ const UNREAD_COUNT = 3;
 function formatIHSG(value: number): string {
   const [int, dec] = value.toFixed(2).split('.');
   return int.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
+}
+
+/** Connection indicator for the live WebSocket stream. */
+function LiveBadge() {
+  const status = useLive();
+  const isLive = status === 'open';
+  const color = isLive ? Colors.sentiment.positive : Colors.text.muted;
+  const label =
+    status === 'open' ? 'LANGSUNG' : status === 'connecting' ? 'MENYAMBUNG' : 'OFFLINE';
+  return (
+    <View style={styles.liveBadge}>
+      <View style={[styles.liveDot, { backgroundColor: color }]} />
+      <Text style={[styles.liveText, { color }]}>{label}</Text>
+    </View>
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -156,18 +173,21 @@ export default function HomeScreen() {
             <Text style={styles.greeting}>{greeting}</Text>
             <Text style={styles.subGreeting}>Pasar bergerak, tetap waspada.</Text>
           </View>
-          <TouchableOpacity style={styles.bellWrap} activeOpacity={0.7}>
-            <Ionicons
-              name="notifications-outline"
-              size={IconSize.md}
-              color={Colors.text.primary}
-            />
-            {UNREAD_COUNT > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{UNREAD_COUNT}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <LiveBadge />
+            <TouchableOpacity style={styles.bellWrap} activeOpacity={0.7}>
+              <Ionicons
+                name="notifications-outline"
+                size={IconSize.md}
+                color={Colors.text.primary}
+              />
+              {UNREAD_COUNT > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{UNREAD_COUNT}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ── Market Status Card ────────────────────────────────────────── */}
@@ -189,6 +209,9 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
+
+        {/* ── Komoditas (live) ──────────────────────────────────────────── */}
+        <CommodityStrip />
 
         {/* ── Berita Penting Hari Ini ───────────────────────────────────── */}
         <View style={styles.section}>
@@ -270,6 +293,26 @@ const styles = StyleSheet.create({
     fontSize: FontSize.body,
     color: Colors.text.muted,
     marginTop: 2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  liveText: {
+    fontSize: FontSize.badge,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.wider,
   },
   bellWrap: {
     position: 'relative',

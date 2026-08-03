@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BookmarksProvider } from '@/src/context/BookmarksContext';
+import { LiveProvider } from '@/src/context/LiveContext';
 import { ReadProvider } from '@/src/context/ReadContext';
 import { SettingsProvider } from '@/src/context/SettingsContext';
 import { TelegramLinkProvider } from '@/src/context/TelegramLinkContext';
@@ -23,6 +24,7 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
+    <LiveProvider>
     <SettingsProvider>
     <WatchlistProvider>
     <BookmarksProvider>
@@ -43,6 +45,7 @@ export default function RootLayout() {
     </BookmarksProvider>
     </WatchlistProvider>
     </SettingsProvider>
+    </LiveProvider>
     </QueryClientProvider>
   );
 }

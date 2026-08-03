@@ -13,6 +13,13 @@ export const API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 ).replace(/\/+$/, '');
 
+/**
+ * WebSocket URL for the live event stream (news + commodity pushes).
+ * Derives from API_BASE_URL: http -> ws, https -> wss (the `^http` also
+ * matches the "http" inside "https", turning it into "wss").
+ */
+export const STREAM_WS_URL = API_BASE_URL.replace(/^http/, 'ws') + '/stream/ws';
+
 const REQUEST_TIMEOUT_MS = 8000;
 
 export interface NewsQuery {
@@ -176,6 +183,34 @@ export async function fetchReactions(
     body: JSON.stringify({ items }),
   });
   return res.reactions;
+}
+
+// ── Commodities (yfinance via backend) ───────────────────────────────────────
+
+export interface CommodityQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  currency: string;
+  change: number | null;
+  changePercent: number | null;
+  /**
+   * TRUE = an Indonesian miner's share price standing in for a commodity that
+   * has no free Yahoo futures contract (coal, nickel). It is NOT a spot price —
+   * the UI must label it as a proxy. See scrapers/commodity_tracker.py.
+   */
+  isProxy: boolean;
+  recordedAt?: string | null;
+}
+
+/**
+ * Latest observed price per tracked commodity. The live WebSocket stream pushes
+ * the same shape into the ['commodities'] query cache, so this REST call is just
+ * the initial load / offline fallback.
+ */
+export async function fetchCommodities(): Promise<CommodityQuote[]> {
+  const res = await getJSON<{ items: CommodityQuote[] }>('/commodities');
+  return res.items ?? [];
 }
 
 // ── Telegram linking ─────────────────────────────────────────────────────────
