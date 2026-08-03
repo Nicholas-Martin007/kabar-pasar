@@ -16,7 +16,7 @@ import { NewsCard } from '@/components/news-card';
 import { StockRow } from '@/components/stock-row';
 import { useNewsFeed } from '@/src/hooks/useNews';
 import { useIndex, useQuotes, useReactions } from '@/src/hooks/useMarket';
-import { ReactionItem } from '@/src/services/api';
+import { API_BASE_URL, ReactionItem } from '@/src/services/api';
 import { mockStocks } from '@/src/data/mockStocks';
 import { useBookmarks } from '@/src/context/BookmarksContext';
 import { useLive, useLiveState } from '@/src/context/LiveContext';
@@ -49,14 +49,44 @@ function formatIHSG(value: number): string {
 /** Connection indicator for the live WebSocket stream. */
 function LiveBadge() {
   const status = useLive();
-  const isLive = status === 'open';
-  const color = isLive ? Colors.sentiment.positive : Colors.text.muted;
+  const color =
+    status === 'open'
+      ? Colors.sentiment.positive
+      : status === 'offline'
+        ? Colors.sentiment.negative
+        : Colors.text.muted;
   const label =
     status === 'open' ? 'LANGSUNG' : status === 'connecting' ? 'MENYAMBUNG' : 'OFFLINE';
   return (
     <View style={styles.liveBadge}>
       <View style={[styles.liveDot, { backgroundColor: color }]} />
       <Text style={[styles.liveText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Shown only when the stream can't connect. Names the exact host the app is
+ * dialling, because the usual cause is a stale LAN IP and the symptom otherwise
+ * gives no clue which address is wrong.
+ */
+function OfflineHint() {
+  const status = useLive();
+  if (status === 'open') return null;
+  return (
+    <View style={styles.offlineHint}>
+      <Ionicons
+        name="cloud-offline-outline"
+        size={14}
+        color={Colors.text.muted}
+      />
+      <Text style={styles.offlineHintText} numberOfLines={2}>
+        {status === 'connecting' ? 'Menyambung ke ' : 'Tidak tersambung ke '}
+        <Text style={styles.offlineHintUrl}>{API_BASE_URL}</Text>
+        {status === 'offline'
+          ? ' — pastikan backend jalan & HP satu Wi-Fi dengan PC.'
+          : ''}
+      </Text>
     </View>
   );
 }
@@ -211,6 +241,10 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Surfaces the target host when the stream is down — the usual cause
+            is a stale LAN IP, which is otherwise invisible from the UI. */}
+        <OfflineHint />
+
         {/* ── Komoditas (live) ──────────────────────────────────────────── */}
         <CommodityStrip />
 
@@ -315,6 +349,29 @@ const styles = StyleSheet.create({
     fontSize: FontSize.badge,
     fontWeight: FontWeight.bold,
     letterSpacing: LetterSpacing.wider,
+  },
+  offlineHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Layout.rowGap,
+    marginHorizontal: Layout.screenPaddingX,
+    marginBottom: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: Radius.component,
+    backgroundColor: Colors.background.surface,
+    borderWidth: Border.width,
+    borderColor: Colors.border.default,
+  },
+  offlineHintText: {
+    flex: 1,
+    fontSize: FontSize.caption,
+    color: Colors.text.muted,
+    lineHeight: 16,
+  },
+  offlineHintUrl: {
+    color: Colors.text.secondary,
+    fontWeight: FontWeight.semibold,
   },
   bellWrap: {
     position: 'relative',

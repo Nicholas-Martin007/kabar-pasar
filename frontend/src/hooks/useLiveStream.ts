@@ -26,6 +26,12 @@ interface Envelope {
 const NEWS_DEBOUNCE_MS = 400;
 // Reconnect backoff ceiling.
 const MAX_BACKOFF_MS = 30_000;
+// React Native's WebSocket has no connect timeout: dialling an unreachable host
+// (a stale LAN IP, backend not running, wrong Wi-Fi) leaves the socket in
+// CONNECTING until the OS TCP timeout — up to ~75s of the UI insisting it is
+// still "connecting" when nothing is going to happen. Fail fast instead, so the
+// badge honestly reads OFFLINE and the backoff loop can retry.
+const CONNECT_TIMEOUT_MS = 8_000;
 
 /**
  * Single live WebSocket connection feeding the React Query cache.
@@ -134,7 +140,29 @@ export function useLiveStream(): LiveState {
       }
       ws = sock;
 
+      // Armed until onopen; see CONNECT_TIMEOUT_MS.
+      let connectTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+        connectTimer = null;
+        if (ws !== sock) return;          // already replaced
+        if (sock.readyState === 0 /* CONNECTING */) {
+          setStatus('offline');
+          try {
+            sock.close();                 // triggers onclose -> scheduleReconnect
+          } catch {
+            // already tearing down
+          }
+        }
+      }, CONNECT_TIMEOUT_MS);
+
+      const clearConnectTimer = () => {
+        if (connectTimer) {
+          clearTimeout(connectTimer);
+          connectTimer = null;
+        }
+      };
+
       sock.onopen = () => {
+        clearConnectTimer();
         attempt = 0;
         setStatus('open');
       };
@@ -149,6 +177,7 @@ export function useLiveStream(): LiveState {
         // onclose fires next and owns reconnection.
       };
       sock.onclose = () => {
+        clearConnectTimer();
         if (ws === sock) ws = null;
         if (!suspended) {
           setStatus('offline');

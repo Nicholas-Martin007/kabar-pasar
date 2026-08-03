@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 import { mockNews } from '@/src/data/mockNews';
 import { News } from '@/src/types/news';
 
@@ -9,9 +11,44 @@ import { News } from '@/src/types/news';
  * your dev machine — use your computer's LAN IP instead, e.g.
  *   EXPO_PUBLIC_API_URL=http://192.168.1.10:8000
  */
-export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
-).replace(/\/+$/, '');
+/** Port the FastAPI backend listens on. */
+const BACKEND_PORT = 8000;
+
+/**
+ * Best-effort LAN host of the dev machine, taken from the Expo dev-server
+ * connection (e.g. hostUri "192.168.1.3:8081" -> "192.168.1.3").
+ *
+ * This exists because a hard-coded LAN IP in .env goes stale every time DHCP
+ * hands out a new address or you move network — and the failure is silent and
+ * confusing: the socket just hangs in CONNECTING until TCP times out. The
+ * phone already reached Metro on the right host, so we reuse it.
+ *
+ * Returns null on web / production builds, where there is no dev server.
+ */
+function devServerHost(): string | null {
+  const hostUri =
+    (Constants.expoConfig as { hostUri?: string } | null)?.hostUri ??
+    // Older/!== SDK shapes keep it here instead.
+    (Constants as unknown as { expoGoConfig?: { debuggerHost?: string } })
+      .expoGoConfig?.debuggerHost;
+  if (!hostUri) return null;
+  const host = hostUri.split(':')[0]?.trim();
+  if (!host || host === 'localhost' || host === '127.0.0.1') return null;
+  return host;
+}
+
+function resolveBaseUrl(): string {
+  // Explicit override always wins — needed to point at a remote backend.
+  const fromEnv = process.env.EXPO_PUBLIC_API_URL?.trim();
+  if (fromEnv) return fromEnv;
+
+  const host = devServerHost();
+  if (host) return `http://${host}:${BACKEND_PORT}`;
+
+  return `http://localhost:${BACKEND_PORT}`;
+}
+
+export const API_BASE_URL = resolveBaseUrl().replace(/\/+$/, '');
 
 /**
  * WebSocket URL for the live event stream (news + commodity pushes).
