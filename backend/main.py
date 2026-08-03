@@ -27,6 +27,7 @@ from backend.services.scheduler import (  # noqa: E402
     shutdown_scheduler,
     start_scheduler,
 )
+from backend.routers import charts as charts_router  # noqa: E402
 from backend.routers import commodities as commodities_router  # noqa: E402
 from backend.routers import stream as stream_router  # noqa: E402
 from scrapers.commodity_tracker import poll_loop as commodity_poll_loop  # noqa: E402
@@ -105,6 +106,7 @@ app.include_router(market_router.router)
 app.include_router(telegram_router.router)
 app.include_router(commodities_router.router)
 app.include_router(stream_router.router)
+app.include_router(charts_router.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

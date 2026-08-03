@@ -137,12 +137,38 @@ to news. Before this ships user-facing: keep the disclaimer visible, never word
 it as "buy/sell", and check OJK rules on investment advice plus App Store
 Guideline 3.2.1 (financial services). Not legal advice — worth a real check.
 
+## TA engine delivery (wired 2026-08-03)
+- `GET /api/v1/charts/{ticker}` → JSON levels + `rationale` + `imageUrl`.
+  `GET /api/v1/charts/{ticker}/image` → the PNG.
+- `backend/services/chart_service.py` runs the blocking render in
+  `asyncio.to_thread` with a 5-min TTL cache and a **per-ticker single-flight
+  lock**. Measured: `/health` stayed at 26 ms max while a chart rendered, and 5
+  concurrent requests for one ticker collapsed to ~3 s instead of 5 renders.
+- `telegram_bot.send_photo()` (multipart) + `send_chart()`; `/chart BBCA` in the
+  bot. Telegram **rejects** captions over 1024 chars rather than trimming, so a
+  long rationale ships as a 1024-code-point caption plus a full follow-up
+  message.
+- `ta_engine/narrative.py` builds the rationale from **rules, not an LLM** —
+  ANTHROPIC_API_KEY is intentionally empty, so an "AI rationale" would just fail.
+
+## Telegram latency fix (2026-08-03)
+`dispatch_alerts` was only ever called from the 5-minute scheduled refresh, so
+articles the 30s fast poller found reached the app in ~30s but Telegram up to
+**5 minutes** later. The fast poller now dispatches too, as a detached task so a
+slow Telegram call can't stall the next polling cycle. Because two producers can
+now alert, `dispatch_alerts` keeps a bounded in-memory set of already-alerted
+ids — a duplicate DB row is harmless (PK rejects it) but a duplicate alert is
+what a user would actually notice.
+
 ## Known limitations / TODO
-- **`ta_engine` is not wired to anything yet** — no API route calls
-  `generate_chart`, and `telegram_bot` still has no `sendPhoto`, so charts are
-  generated on demand from Python but not delivered anywhere.
 - **`static/charts/` is never pruned** — one PNG per ticker, overwritten each
   run, but nothing deletes stale tickers.
+- **`sendPhoto` is unverified against the live Telegram API** — the bot token
+  currently returns 401, so it was verified against a mocked transport
+  (multipart shape, caption trimming, follow-up) but never actually delivered a
+  photo. Re-test `/chart BBCA` once a valid token is in `backend/.env`.
+- **The app has no chart UI** — `/api/v1/charts/{ticker}` is live but nothing in
+  `frontend/` calls it yet.
 - **`commodity_price` grows unbounded** — no retention/pruning job yet. Only
   price *changes* are stored, which bounds it a lot, but a busy day still adds
   thousands of rows. Add a pruning job before this runs for weeks.

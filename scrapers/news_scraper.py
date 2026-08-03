@@ -238,9 +238,35 @@ async def persist_and_broadcast(items: List[News]) -> int:
         new_items = await upsert_news_items(session, items)
 
     if new_items:
+        # Broadcast first: in-process fan-out is effectively instant, so
+        # connected clients see the item before we start any network I/O.
         bus.publish_news([n.model_dump(by_alias=True, mode="json") for n in new_items])
+
+        # Telegram used to fire only from the 5-minute scheduled refresh, so
+        # anything this fast lane found reached the app in ~30s but the bot up
+        # to 5 minutes later. Dispatch here too — as a detached task, because a
+        # slow Telegram API call must not stall the next polling cycle.
+        asyncio.create_task(_dispatch_alerts_safe(new_items))
+
         logger.info("fastpoll.new count=%d", len(new_items))
     return len(new_items)
+
+
+async def _dispatch_alerts_safe(items: List[News]) -> None:
+    """
+    Fire-and-forget Telegram dispatch.
+
+    Detached tasks swallow exceptions silently unless something awaits them, and
+    an unhandled error here would be invisible — hence the explicit try/except.
+    """
+    try:
+        from telegram_bot.telegram_service import dispatch_alerts
+
+        sent = await dispatch_alerts(items)
+        if sent:
+            logger.info("fastpoll.alerts_dispatched count=%d", sent)
+    except Exception as exc:
+        logger.warning("fastpoll.alert_dispatch_failed error=%s", exc)
 
 
 async def poll_loop() -> None:

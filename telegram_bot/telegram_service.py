@@ -12,11 +12,14 @@ app's local watchlist. Disabled gracefully when TELEGRAM_BOT_TOKEN is unset.
 
 import asyncio
 import html
+import json
 import logging
 import os
 import secrets
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -28,6 +31,21 @@ from backend.models.news import News
 logger = logging.getLogger(__name__)
 
 _API = "https://api.telegram.org/bot{token}/{method}"
+
+# Telegram rejects photo captions longer than this outright (not truncates).
+_CAPTION_LIMIT = 1024
+
+# Article ids already alerted on, so two producers can't double-notify (see
+# dispatch_alerts). Bounded and insertion-ordered — a plain set would grow
+# without limit in a long-running process.
+_ALERTED_MAX = 5000
+_alerted_ids: "OrderedDict[str, None]" = OrderedDict()
+
+
+def _remember_alerted(news_id: str) -> None:
+    _alerted_ids[news_id] = None
+    while len(_alerted_ids) > _ALERTED_MAX:
+        _alerted_ids.popitem(last=False)  # drop oldest
 
 
 def _token() -> str:
@@ -51,6 +69,8 @@ HELP = (
     "/watch BBCA — hanya saham tertentu\n"
     "/follow emas — hanya topik tertentu\n"
     "/unwatch · /unfollow — kebalikannya\n\n"
+    "<b>Analisis</b>\n"
+    "/chart BBCA — chart teknikal harian + level TP/SL\n\n"
     "<b>Lainnya</b>\n"
     "/news 15 — tampilkan N berita terbaru (default 10)\n"
     "/digest — ringkasan berita hari ini\n"
@@ -92,6 +112,84 @@ async def _post(method: str, payload: dict, timeout: float = 15) -> Optional[dic
     except Exception as exc:
         logger.warning("telegram.post_failed method=%s error=%s", method, exc)
         return None
+
+
+async def send_photo(
+    chat_id: str,
+    photo_path: str,
+    caption: str = "",
+    reply_markup: Optional[dict] = None,
+) -> bool:
+    """
+    Upload a local image via multipart. Returns True on success.
+
+    Separate from `_post` because sendPhoto needs multipart/form-data, not JSON.
+    Telegram *rejects* captions over 1024 chars rather than trimming them, and a
+    full TA rationale runs longer than that — so the photo carries a trimmed
+    caption and the complete text follows as a normal message instead of being
+    silently lost.
+    """
+    if not _token():
+        return False
+
+    path = Path(photo_path)
+    if not path.is_file():
+        logger.warning("telegram.photo_missing path=%s", photo_path)
+        return False
+
+    overflow = len(caption) > _CAPTION_LIMIT
+    short = (caption[: _CAPTION_LIMIT - 1] + "…") if overflow else caption
+
+    url = _API.format(token=_token(), method="sendPhoto")
+    data = {"chat_id": chat_id, "parse_mode": "HTML"}
+    if short:
+        data["caption"] = short
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup)
+
+    try:
+        with path.open("rb") as fh:
+            files = {"photo": (path.name, fh, "image/png")}
+            # Uploads are slower than JSON calls — a 150 KB PNG on a poor
+            # connection needs more than the usual 15s.
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(url, data=data, files=files)
+                resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("telegram.photo_failed path=%s error=%s", path.name, exc)
+        return False
+
+    if overflow:
+        await send_message(chat_id, caption)
+    logger.info("telegram.photo_sent chat=%s file=%s", chat_id, path.name)
+    return True
+
+
+async def send_chart(chat_id: str, ticker: str) -> bool:
+    """
+    Generate the TA chart for `ticker` and deliver rationale + PNG.
+
+    Imported lazily: ta_engine pulls in matplotlib/pandas, and this module is
+    imported at app startup by the poller — no reason to pay that cost unless
+    someone actually asks for a chart.
+    """
+    from backend.services.chart_service import get_chart_with_rationale
+
+    try:
+        result, rationale = await get_chart_with_rationale(ticker)
+    except ValueError as exc:
+        await send_message(chat_id, f"⚠️ {html.escape(str(exc))}")
+        return False
+    except Exception as exc:
+        logger.warning("telegram.chart_failed ticker=%s error=%s", ticker, exc)
+        await send_message(chat_id, "⚠️ Gagal membuat chart. Coba lagi sebentar lagi.")
+        return False
+
+    ok = await send_photo(chat_id, result.chart_path, caption=rationale)
+    if not ok:
+        # Image failed but the analysis is still worth delivering.
+        await send_message(chat_id, rationale)
+    return ok
 
 
 async def send_message(
@@ -277,9 +375,26 @@ async def dispatch_digest(limit: int = 10) -> int:
 
 
 async def dispatch_alerts(new_items: List[News]) -> int:
-    """Push newly-ingested news to subscribers by watchlist / topic / firehose."""
+    """
+    Push newly-ingested news to subscribers by watchlist / topic / firehose.
+
+    Two producers now call this: the 30s fast poller and the 5-minute scheduled
+    refresh. They overlap on Kontan/CNBC/Bloomberg, and although
+    `upsert_news_items` normally hands each article to only one of them, the
+    read-then-insert isn't atomic — a narrow interleave could show the same item
+    to both. A duplicate DB row is harmless (the PK rejects it); a duplicate
+    Telegram alert is what the user would actually notice. The in-memory guard
+    below makes alerting idempotent per article regardless of caller.
+    """
     if not _token() or not new_items or _in_quiet_hours():
         return 0
+
+    fresh = [n for n in new_items if n.id not in _alerted_ids]
+    if not fresh:
+        return 0
+    for n in fresh:
+        _remember_alerted(n.id)
+    new_items = fresh
 
     async with get_session() as session:
         subscribers = await repo.list_subscribers(session)
@@ -305,6 +420,17 @@ async def _handle_command(chat_id: str, text: str) -> None:
     parts = text.strip().split()
     cmd = parts[0].lower().lstrip("/").split("@")[0]
     arg = parts[1].upper() if len(parts) > 1 else ""
+
+    # Handled before the DB session opens: rendering takes seconds and there's
+    # no reason to hold a session across it.
+    if cmd == "chart":
+        if not arg:
+            await send_message(chat_id, "Format: <code>/chart BBCA</code>")
+            return
+        symbol = arg if "." in arg else f"{arg}.JK"
+        await send_message(chat_id, f"⏳ Membuat chart {html.escape(symbol)}…")
+        await send_chart(chat_id, symbol)
+        return
 
     async with get_session() as session:
         if cmd == "start":
