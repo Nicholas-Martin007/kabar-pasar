@@ -27,7 +27,7 @@ import math
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 
@@ -51,6 +51,14 @@ from .indicators import (  # noqa: E402
     build_levels,
     nearest_levels,
 )
+from .pattern_detector import MIN_QUALITY, Pattern, detect_patterns  # noqa: E402
+
+# Pattern geometry is drawn in its own palette. Green/red already mean
+# support/TP and resistance/SL on this chart; reusing them for trendlines would
+# read as levels rather than boundaries.
+_PATTERN_BULL_COLOR = "#22D3EE"
+_PATTERN_BEAR_COLOR = "#F472B6"
+_PATTERN_NEUTRAL_COLOR = "#A78BFA"
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +120,10 @@ class ChartResult:
     currency: str
     as_of: str
     warnings: List[str] = field(default_factory=list)
+    # High-conformance chart patterns found in the window, best first. Usually
+    # empty — see `quality_score` in pattern_detector for what the number means
+    # (shape conformance, NOT probability of success).
+    patterns: List[Dict[str, Any]] = field(default_factory=list)
     disclaimer: str = DISCLAIMER
 
     def to_dict(self) -> Dict[str, Any]:
@@ -206,6 +218,34 @@ def _compute_trade_levels(
     }
 
 
+def _pattern_alines(
+    patterns: List[Pattern], visible_start: pd.Timestamp
+) -> Tuple[List[List[Tuple[Any, float]]], List[str]]:
+    """
+    Convert detected patterns into mplfinance `alines` segments.
+
+    Points earlier than `visible_start` are clamped to it: a pattern that began
+    before the plotted window still shows its geometry rather than being dropped
+    or, worse, silently stretching the x-axis back months.
+    """
+    segments: List[List[Tuple[Any, float]]] = []
+    colors: List[str] = []
+    for p in patterns:
+        # Pattern geometry gets its own colour. Green/red are already spoken
+        # for by support/TP vs resistance/SL, and reusing them here would imply
+        # a level where there is only a boundary.
+        color = _PATTERN_BULL_COLOR if p.direction == "bullish" else _PATTERN_BEAR_COLOR
+        if p.direction == "neutral":
+            color = _PATTERN_NEUTRAL_COLOR
+        for seg in p.lines:
+            clipped = [(max(pd.Timestamp(ts), visible_start), price) for ts, price in seg]
+            if clipped[0][0] >= clipped[-1][0]:
+                continue  # collapsed entirely outside the window
+            segments.append(clipped)
+            colors.append(color)
+    return segments, colors
+
+
 def _render_chart(
     df: pd.DataFrame,
     ticker: str,
@@ -214,9 +254,11 @@ def _render_chart(
     resistance: Optional[Level],
     out_path: Path,
     plot_bars: int,
+    patterns: Optional[List[Pattern]] = None,
 ) -> None:
     """Candlestick + EMA overlays + green (support/TP) and red (resistance/SL) lines."""
     plot_df = df.tail(plot_bars)
+    patterns = patterns or []
 
     addplots = [
         mpf.make_addplot(plot_df["ema20"], color="#3B9ED6", width=1.1),
@@ -235,6 +277,13 @@ def _render_chart(
         colors=["#22C55E"] * len(green) + ["#F43F5E"] * len(red),
         linestyle="--",
         linewidths=1.0,
+    )
+
+    segments, seg_colors = _pattern_alines(patterns, pd.Timestamp(plot_df.index[0]))
+    alines = (
+        dict(alines=segments, colors=seg_colors, linestyle="-", linewidths=1.4)
+        if segments
+        else None
     )
 
     style = mpf.make_mpf_style(
@@ -257,6 +306,10 @@ def _render_chart(
 
     with _render_lock:
         try:
+            plot_kwargs: Dict[str, Any] = {}
+            if alines is not None:
+                plot_kwargs["alines"] = alines
+
             fig, axes = mpf.plot(
                 plot_df,
                 type="candle",
@@ -268,6 +321,7 @@ def _render_chart(
                 title=title,
                 ylabel="Harga",
                 ylabel_lower="Volume",
+                **plot_kwargs,
                 returnfig=True,
                 tight_layout=True,
             )
@@ -320,6 +374,34 @@ def _render_chart(
                     ),
                 )
 
+            # Pattern legend, top-left, one line each. The score is labelled
+            # "kualitas bentuk" (shape quality) on purpose — it is geometric
+            # conformance, not a probability that the pattern plays out.
+            if patterns:
+                for row, p in enumerate(patterns[:3]):
+                    color = (
+                        _PATTERN_BULL_COLOR if p.direction == "bullish"
+                        else _PATTERN_BEAR_COLOR if p.direction == "bearish"
+                        else _PATTERN_NEUTRAL_COLOR
+                    )
+                    ax.annotate(
+                        f"{p.pattern_type}  ·  kualitas bentuk {p.quality_score:.2f}",
+                        xy=(0.012, 0.965 - row * 0.052),
+                        xycoords="axes fraction",
+                        ha="left",
+                        va="top",
+                        fontsize=8,
+                        color=color,
+                        weight="bold",
+                        bbox=dict(
+                            boxstyle="round,pad=0.3",
+                            facecolor="#0F1521",
+                            edgecolor=color,
+                            linewidth=0.7,
+                            alpha=0.85,
+                        ),
+                    )
+
             fig.text(
                 0.01, 0.01, DISCLAIMER,
                 fontsize=6.5, color="#6F80A2", ha="left", va="bottom",
@@ -338,6 +420,7 @@ def generate_chart(
     interval: str = "1d",
     out_dir: Optional[Path] = None,
     plot_bars: int = 120,
+    min_pattern_quality: float = MIN_QUALITY,
 ) -> ChartResult:
     """
     Build the daily TA chart and levels for `ticker`.
@@ -371,12 +454,16 @@ def generate_chart(
     support, resistance = nearest_levels(entry, all_levels)
     trade = _compute_trade_levels(entry, atr, support, resistance)
 
+    patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
+
     out_dir = out_dir or _CHART_DIR
     # Symbol goes into a filename — keep it path-safe ("BBCA.JK" -> "BBCA_JK").
     safe = symbol.replace(".", "_").replace("/", "_")
     out_path = Path(out_dir) / f"{safe}_daily.png"
 
-    _render_chart(df, symbol, trade, support, resistance, out_path, plot_bars)
+    _render_chart(
+        df, symbol, trade, support, resistance, out_path, plot_bars, patterns
+    )
 
     warnings = list(trade["warnings"])
     if resistance is None:
@@ -416,6 +503,7 @@ def generate_chart(
         currency="IDR" if symbol.endswith(".JK") else "USD",
         as_of=df.index[-1].strftime("%Y-%m-%d"),
         warnings=warnings,
+        patterns=[p.to_dict() for p in patterns],
     )
 
     logger.info(
