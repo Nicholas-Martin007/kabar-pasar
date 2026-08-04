@@ -60,6 +60,36 @@ _PATTERN_BULL_COLOR = "#22D3EE"
 _PATTERN_BEAR_COLOR = "#F472B6"
 _PATTERN_NEUTRAL_COLOR = "#A78BFA"
 
+# Blank bars appended to the right of the plot. Without this the newest candles
+# and the TP/SL labels are jammed against the y-axis tick labels and the price
+# projections have nowhere to sit.
+_RIGHT_MARGIN_BARS = 12
+
+# Sentiment palette for the corner badge.
+_SENTIMENT_STYLE = {
+    "BULLISH": ("#22C55E", "BULLISH"),
+    "BEARISH_WARNING": ("#F43F5E", "WARNING / BEARISH"),
+    "NEUTRAL": ("#F5A623", "NEUTRAL"),
+}
+
+# Timeframes scanned, in the order they are tried. yfinance resamples "4h"
+# internally (Yahoo itself only serves 1h natively), and intraday history is
+# capped — 180d of 4h yields ~345 bars, comfortably past the 51 that EMA50
+# needs, while 1y of 4h would be no deeper for the intraday window.
+_TIMEFRAMES: List[Tuple[str, str]] = [
+    ("1d", "1y"),
+    ("4h", "180d"),
+]
+
+
+def _sentiment_for(direction: Optional[str]) -> str:
+    """Map a pattern's directional bias to the badge vocabulary."""
+    if direction == "bullish":
+        return "BULLISH"
+    if direction == "bearish":
+        return "BEARISH_WARNING"
+    return "NEUTRAL"
+
 logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
@@ -124,10 +154,28 @@ class ChartResult:
     # empty — see `quality_score` in pattern_detector for what the number means
     # (shape conformance, NOT probability of success).
     patterns: List[Dict[str, Any]] = field(default_factory=list)
+
+    # ── Multi-timeframe summary ──────────────────────────────────────────────
+    # Which candle interval this chart was actually drawn from. Both 1d and 4h
+    # are scanned; the one holding the better-conforming pattern wins, and 1d is
+    # the fallback when neither qualifies.
+    selected_timeframe: str = "1d"
+    pattern_detected: bool = False
+    pattern_name: Optional[str] = None
+    # "BULLISH" | "BEARISH_WARNING" | "NEUTRAL"
+    sentiment: str = "NEUTRAL"
+    # Shape conformance of the winning pattern, 0.0 when none qualified. This is
+    # geometry, not a probability of the setup working.
+    quality_score: float = 0.0
+
     disclaimer: str = DISCLAIMER
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # `stop_loss` mirrors `sl` so consumers can use either name; `sl` stays
+        # for the existing API/Telegram callers.
+        d["stop_loss"] = d.get("sl")
+        return d
 
 
 def _fetch_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame:
@@ -255,6 +303,8 @@ def _render_chart(
     out_path: Path,
     plot_bars: int,
     patterns: Optional[List[Pattern]] = None,
+    timeframe: str = "1d",
+    sentiment: str = "NEUTRAL",
 ) -> None:
     """Candlestick + EMA overlays + green (support/TP) and red (resistance/SL) lines."""
     plot_df = df.tail(plot_bars)
@@ -297,8 +347,9 @@ def _render_chart(
     )
 
     last = df.iloc[-1]
+    tf_label = {"1d": "Daily", "4h": "4-Hour", "1h": "1-Hour"}.get(timeframe, timeframe)
     title = (
-        f"\n{ticker} — Daily   "
+        f"\n{ticker} — {tf_label}   "
         f"RSI({RSI_WINDOW}) {last['rsi14']:.1f}   ATR({ATR_WINDOW}) {last['atr14']:.2f}"
     )
 
@@ -327,6 +378,31 @@ def _render_chart(
             )
 
             ax = axes[0]
+
+            # Right margin. mplfinance places candles at integer x positions, so
+            # widening xlim adds blank space without touching the data — the
+            # newest candles and every right-aligned price label stop colliding
+            # with the y-axis ticks, and projected TP lines have somewhere to run.
+            x_lo, x_hi = ax.get_xlim()
+            ax.set_xlim(x_lo, x_hi + _RIGHT_MARGIN_BARS)
+
+            # A fitted boundary can start well above/below the candles it was
+            # derived from — a symmetrical triangle's upper line especially.
+            # Matplotlib then clips it at the axis and it reads as a rendering
+            # glitch (a line entering from nowhere). Give it headroom, but cap
+            # the expansion so the candles never get squashed to fit a trendline.
+            if segments:
+                pts = [p for seg in segments for _ts, p in seg]
+                y_lo, y_hi = ax.get_ylim()
+                span = y_hi - y_lo
+                want_lo = min(y_lo, min(pts))
+                want_hi = max(y_hi, max(pts))
+                limit = span * 0.20
+                ax.set_ylim(
+                    max(want_lo, y_lo - limit),
+                    min(want_hi, y_hi + limit),
+                )
+
             annotations = [
                 (levels["tp2"], f"TP2 {levels['tp2']:,.2f}", "#22C55E"),
                 (levels["tp1"], f"TP1 {levels['tp1']:,.2f}", "#22C55E"),
@@ -374,33 +450,62 @@ def _render_chart(
                     ),
                 )
 
-            # Pattern legend, top-left, one line each. The score is labelled
-            # "kualitas bentuk" (shape quality) on purpose — it is geometric
-            # conformance, not a probability that the pattern plays out.
+            # Sentiment badge, top-left. "Quality" is shape conformance, and the
+            # label says so — it is not a probability that the setup works.
+            badge_color, badge_word = _SENTIMENT_STYLE.get(
+                sentiment, _SENTIMENT_STYLE["NEUTRAL"]
+            )
             if patterns:
-                for row, p in enumerate(patterns[:3]):
-                    color = (
-                        _PATTERN_BULL_COLOR if p.direction == "bullish"
-                        else _PATTERN_BEAR_COLOR if p.direction == "bearish"
-                        else _PATTERN_NEUTRAL_COLOR
-                    )
-                    ax.annotate(
-                        f"{p.pattern_type}  ·  kualitas bentuk {p.quality_score:.2f}",
-                        xy=(0.012, 0.965 - row * 0.052),
-                        xycoords="axes fraction",
-                        ha="left",
-                        va="top",
-                        fontsize=8,
-                        color=color,
-                        weight="bold",
-                        bbox=dict(
-                            boxstyle="round,pad=0.3",
-                            facecolor="#0F1521",
-                            edgecolor=color,
-                            linewidth=0.7,
-                            alpha=0.85,
-                        ),
-                    )
+                best = patterns[0]
+                badge_text = (
+                    f"[{badge_word}]  {best.pattern_type}   "
+                    f"(shape quality {best.quality_score * 100:.0f}% | {timeframe.upper()})"
+                )
+            else:
+                badge_text = f"[{badge_word}]  Standard TA — no qualifying pattern | {timeframe.upper()}"
+
+            ax.annotate(
+                badge_text,
+                xy=(0.012, 0.972),
+                xycoords="axes fraction",
+                ha="left",
+                va="top",
+                fontsize=8.5,
+                color=badge_color,
+                weight="bold",
+                bbox=dict(
+                    boxstyle="round,pad=0.38",
+                    facecolor="#0F1521",
+                    edgecolor=badge_color,
+                    linewidth=1.1,
+                    alpha=0.92,
+                ),
+            )
+
+            # Secondary patterns, if any, listed under the badge.
+            for row, p in enumerate(patterns[1:3]):
+                color = (
+                    _PATTERN_BULL_COLOR if p.direction == "bullish"
+                    else _PATTERN_BEAR_COLOR if p.direction == "bearish"
+                    else _PATTERN_NEUTRAL_COLOR
+                )
+                ax.annotate(
+                    f"{p.pattern_type}  ·  {p.quality_score * 100:.0f}%",
+                    xy=(0.012, 0.905 - row * 0.048),
+                    xycoords="axes fraction",
+                    ha="left",
+                    va="top",
+                    fontsize=7.5,
+                    color=color,
+                    weight="bold",
+                    bbox=dict(
+                        boxstyle="round,pad=0.26",
+                        facecolor="#0F1521",
+                        edgecolor=color,
+                        linewidth=0.6,
+                        alpha=0.85,
+                    ),
+                )
 
             fig.text(
                 0.01, 0.01, DISCLAIMER,
@@ -414,55 +519,146 @@ def _render_chart(
             plt.close("all")
 
 
-def generate_chart(
-    ticker: str,
-    period: str = "1y",
-    interval: str = "1d",
-    out_dir: Optional[Path] = None,
-    plot_bars: int = 120,
-    min_pattern_quality: float = MIN_QUALITY,
-) -> ChartResult:
-    """
-    Build the daily TA chart and levels for `ticker`.
+@dataclass
+class _TimeframeAnalysis:
+    """Everything computed for one candle interval, before a winner is chosen."""
 
-    Args:
-        ticker: Yahoo symbol. IDX names need the .JK suffix (e.g. "BBCA.JK").
-        period: yfinance lookback for the CALCULATION window (needs >= ~60 bars
-            so EMA50 is defined).
-        plot_bars: how many recent bars to actually draw. Indicators still use
-            the full period; this only keeps the image readable.
+    timeframe: str
+    df: pd.DataFrame
+    entry: float
+    atr: float
+    rsi: float
+    support: Optional[Level]
+    resistance: Optional[Level]
+    trade: Dict[str, Any]
+    patterns: List[Pattern]
 
-    Returns:
-        ChartResult with the PNG path, levels, RSI and any warnings.
+    @property
+    def best_score(self) -> float:
+        """Top pattern conformance, or 0.0 when nothing qualified."""
+        return self.patterns[0].quality_score if self.patterns else 0.0
 
-    Raises:
-        ValueError: unknown/empty symbol, or too few bars for the indicators.
-    """
-    symbol = ticker.strip().upper()
-    df = _fetch_ohlcv(symbol, period, interval)
-    df = add_indicators(df)
+
+def _analyse_timeframe(
+    symbol: str, interval: str, period: str, min_pattern_quality: float
+) -> _TimeframeAnalysis:
+    """Fetch, compute indicators, derive levels and scan patterns for one interval."""
+    df = add_indicators(_fetch_ohlcv(symbol, period, interval))
 
     last = df.iloc[-1]
     entry = float(last["Close"])
     atr = float(last["atr14"])
     rsi = float(last["rsi14"])
-
     if not math.isfinite(atr) or atr <= 0:
-        raise ValueError(f"ATR is {atr} for {symbol} — cannot size a stop")
+        raise ValueError(f"ATR is {atr} for {symbol} @{interval} — cannot size a stop")
 
-    all_levels = build_levels(df, atr)
-    support, resistance = nearest_levels(entry, all_levels)
+    support, resistance = nearest_levels(entry, build_levels(df, atr))
     trade = _compute_trade_levels(entry, atr, support, resistance)
-
     patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
+
+    return _TimeframeAnalysis(
+        timeframe=interval,
+        df=df,
+        entry=entry,
+        atr=atr,
+        rsi=rsi,
+        support=support,
+        resistance=resistance,
+        trade=trade,
+        patterns=patterns,
+    )
+
+
+def generate_chart(
+    ticker: str,
+    period: Optional[str] = None,
+    interval: Optional[str] = None,
+    out_dir: Optional[Path] = None,
+    plot_bars: int = 120,
+    min_pattern_quality: float = MIN_QUALITY,
+    multi_timeframe: bool = True,
+) -> ChartResult:
+    """
+    Build the TA chart and levels for `ticker`, choosing the better timeframe.
+
+    Both 1d and 4h are analysed; whichever holds the higher-conforming pattern
+    is the one rendered. When neither produces a qualifying pattern the daily
+    chart wins by default — it is the more reliable structure and the intraday
+    window is short.
+
+    Args:
+        ticker: Yahoo symbol. IDX names need the .JK suffix (e.g. "BBCA.JK").
+        interval/period: pin a single timeframe instead of scanning. Supplying
+            either implies multi_timeframe=False.
+        plot_bars: how many recent bars to draw. Indicators still use the full
+            period; this only keeps the image readable.
+        multi_timeframe: set False to analyse the daily chart alone (cheaper —
+            one yfinance download instead of two).
+
+    Returns:
+        ChartResult with the PNG path, levels, RSI, chosen timeframe, sentiment
+        and any warnings.
+
+    Raises:
+        ValueError: unknown/empty symbol, or too few bars for the indicators.
+    """
+    symbol = ticker.strip().upper()
+
+    # An explicit interval/period is a deliberate pin — honour it and skip the scan.
+    if interval is not None or period is not None or not multi_timeframe:
+        candidates = [(interval or "1d", period or "1y")]
+    else:
+        candidates = list(_TIMEFRAMES)
+
+    analyses: List[_TimeframeAnalysis] = []
+    errors: List[str] = []
+    for tf, per in candidates:
+        try:
+            analyses.append(_analyse_timeframe(symbol, tf, per, min_pattern_quality))
+        except Exception as exc:
+            # One timeframe failing (thin intraday history, holiday gaps) must
+            # not sink the whole request when the other is fine.
+            errors.append(f"{tf}: {exc}")
+            logger.info("ta.timeframe_skipped ticker=%s tf=%s error=%s", symbol, tf, exc)
+
+    if not analyses:
+        raise ValueError(f"no usable data for '{symbol}' ({'; '.join(errors)})")
+
+    # Highest-conformance pattern wins. Ties (including the all-zero case where
+    # nothing qualified anywhere) fall to the earlier entry in _TIMEFRAMES,
+    # which is the daily chart.
+    chosen = max(analyses, key=lambda a: a.best_score)
+
+    df = chosen.df
+    last = df.iloc[-1]
+    entry, atr, rsi = chosen.entry, chosen.atr, chosen.rsi
+    support, resistance = chosen.support, chosen.resistance
+    trade = chosen.trade
+    patterns = chosen.patterns
+
+    if len(analyses) > 1:
+        logger.info(
+            "ta.timeframe_selected ticker=%s chosen=%s scores=%s",
+            symbol, chosen.timeframe,
+            {a.timeframe: round(a.best_score, 3) for a in analyses},
+        )
 
     out_dir = out_dir or _CHART_DIR
     # Symbol goes into a filename — keep it path-safe ("BBCA.JK" -> "BBCA_JK").
     safe = symbol.replace(".", "_").replace("/", "_")
-    out_path = Path(out_dir) / f"{safe}_daily.png"
+    # Daily keeps the historical "_daily" name so existing links stay valid;
+    # other intervals are named for what they actually are. A 4-hour chart
+    # sitting in a file called "_daily.png" is a trap for anything that reads
+    # the path instead of the payload.
+    suffix = "daily" if chosen.timeframe == "1d" else chosen.timeframe
+    out_path = Path(out_dir) / f"{safe}_{suffix}.png"
+
+    best = patterns[0] if patterns else None
+    sentiment = _sentiment_for(best.direction if best else None)
 
     _render_chart(
-        df, symbol, trade, support, resistance, out_path, plot_bars, patterns
+        df, symbol, trade, support, resistance, out_path, plot_bars, patterns,
+        timeframe=chosen.timeframe, sentiment=sentiment,
     )
 
     warnings = list(trade["warnings"])
@@ -501,13 +697,23 @@ def generate_chart(
         risk_reward_tp1=round(_TP1_R, 2),
         risk_reward_tp2=round(_TP2_R, 2),
         currency="IDR" if symbol.endswith(".JK") else "USD",
-        as_of=df.index[-1].strftime("%Y-%m-%d"),
+        # 4h bars need the time to be meaningful; daily bars don't.
+        as_of=df.index[-1].strftime(
+            "%Y-%m-%d %H:%M" if chosen.timeframe != "1d" else "%Y-%m-%d"
+        ),
         warnings=warnings,
         patterns=[p.to_dict() for p in patterns],
+        selected_timeframe=chosen.timeframe,
+        pattern_detected=best is not None,
+        pattern_name=best.pattern_type if best else None,
+        sentiment=sentiment,
+        quality_score=best.quality_score if best else 0.0,
     )
 
     logger.info(
-        "ta.chart_generated ticker=%s close=%.2f sl=%.2f tp1=%.2f tp2=%.2f rsi=%.1f warnings=%d",
-        symbol, entry, result.sl, result.tp1, result.tp2, rsi, len(warnings),
+        "ta.chart_generated ticker=%s tf=%s close=%.2f sl=%.2f tp1=%.2f tp2=%.2f "
+        "rsi=%.1f pattern=%s sentiment=%s warnings=%d",
+        symbol, chosen.timeframe, entry, result.sl, result.tp1, result.tp2, rsi,
+        result.pattern_name or "none", sentiment, len(warnings),
     )
     return result

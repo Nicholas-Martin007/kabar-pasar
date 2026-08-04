@@ -58,6 +58,19 @@ def build_rationale(result: "ChartResult") -> str:
         "<b>Level kunci</b>",
     ]
 
+    # Mirror the chart's sentiment badge. Without this the image says
+    # "WARNING / BEARISH" while the caption beside it says nothing, and the
+    # reader has to reconcile the two.
+    if result.pattern_detected and result.pattern_name:
+        icon = {"BULLISH": "🟢", "BEARISH_WARNING": "🔴"}.get(result.sentiment, "🟡")
+        tf = result.selected_timeframe.upper()
+        lines += [
+            "",
+            f"{icon} <b>Pola terdeteksi:</b> {result.pattern_name} "
+            f"({tf}, kemiripan bentuk {result.quality_score * 100:.0f}%)",
+            "<i>Skor = seberapa rapi bentuknya, bukan peluang berhasil.</i>",
+        ]
+
     if result.support is not None:
         lines.append(f"🟢 Support: <b>{result.support:,.2f}</b>")
     else:
