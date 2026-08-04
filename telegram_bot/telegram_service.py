@@ -263,12 +263,58 @@ def _base_match(sub: dict, hay: str, tickers) -> bool:
     return any(kw in hay for kw in keywords) if keywords else False
 
 
+def _source_allowed(sub: dict, source_value: str) -> bool:
+    """
+    Source allow-list from the app's control panel.
+
+    An EMPTY list means "all sources", not "none" — otherwise every existing
+    subscriber would go silent the moment the column was added.
+    """
+    allowed = sub.get("sources") or []
+    return True if not allowed else source_value in allowed
+
+
 def _matches(sub: dict, item: News) -> bool:
+    # MSCI reviews bypass every content filter. They move index-fund flows
+    # mechanically on a known date, so a watchlist or high-only setting
+    # shouldn't hide one. The master `news_alerts` switch below still wins —
+    # a user who turned news off entirely gets nothing, which is consent, not
+    # a filter. Detection is precise enough for this to be safe; see
+    # scrapers.msci_tracker.
+    if not sub.get("news_alerts", True):
+        return False
+    if getattr(item, "is_msci_alert", False):
+        return True
+    if not _source_allowed(sub, item.source.value):
+        return False
     hay = f"{item.title} {item.excerpt} {item.source.value}".lower()
     if not _base_match(sub, hay, item.tickers):
         return False
     if sub.get("high_only") and item.importance.value != "high":
         return False
+    return True
+
+
+def matches_stockpick(sub: dict, pick: dict) -> bool:
+    """
+    Whether a screener pick should reach this subscriber.
+
+    Opt-in (defaults off) and gated on the control panel's RSI threshold —
+    `min_rsi` is an upper bound here because the screener hunts oversold names,
+    so "min RSI 40" means "only show me things at RSI <= 40".
+    """
+    if not sub.get("stockpick_alerts", False):
+        return False
+    if _in_quiet_hours():
+        return False
+    threshold = int(sub.get("min_rsi", 100) or 100)
+    if float(pick.get("rsi", 0)) > threshold:
+        return False
+    watch = set(sub.get("tickers") or [])
+    if watch:
+        # Strip the .JK suffix so a watchlist of "BBCA" matches "BBCA.JK".
+        base = str(pick.get("ticker", "")).split(".")[0].upper()
+        return base in watch or str(pick.get("ticker", "")).upper() in watch
     return True
 
 

@@ -17,7 +17,9 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
+from backend.db.repository import backfill_msci_flags  # noqa: E402
 from backend.db.session import dispose as db_dispose  # noqa: E402
+from backend.db.session import get_session  # noqa: E402
 from backend.db.session import init_db  # noqa: E402
 from backend.routers import market as market_router  # noqa: E402
 from backend.routers import news as news_router  # noqa: E402
@@ -28,6 +30,7 @@ from backend.services.scheduler import (  # noqa: E402
     start_scheduler,
 )
 from backend.routers import charts as charts_router  # noqa: E402
+from backend.routers import ihsg as ihsg_router  # noqa: E402
 from backend.tasks import pool as task_pool  # noqa: E402
 from backend.routers import commodities as commodities_router  # noqa: E402
 from backend.routers import stream as stream_router  # noqa: E402
@@ -46,6 +49,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
+    # Classify news cached before the MSCI columns existed. Only matching rows
+    # are written, so this is effectively a no-op after the first run.
+    try:
+        async with get_session() as session:
+            await backfill_msci_flags(session)
+    except Exception as exc:
+        logger.warning("app.msci_backfill_failed error=%s", exc)
     # Worker pool first: the scheduler and pollers below hand work to it, and a
     # job submitted before the workers exist would sit in the queue unclaimed.
     task_pool.start()
@@ -112,6 +122,7 @@ app.include_router(telegram_router.router)
 app.include_router(commodities_router.router)
 app.include_router(stream_router.router)
 app.include_router(charts_router.router)
+app.include_router(ihsg_router.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -32,6 +32,16 @@ class NewsRow(Base):
     importance:    Mapped[str]      = mapped_column(String(16), default="medium", index=True)
     category:      Mapped[str]      = mapped_column(String(32), default="market_news")
     url:           Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── MSCI priority routing ────────────────────────────────────────────────
+    # MSCI index reviews force mechanical index-fund flows through IDX names, so
+    # they get their own alert class instead of competing with ordinary news.
+    # Indexed because the alert path filters on it every cycle.
+    is_msci_alert: Mapped[bool] = mapped_column(default=False, index=True)
+    # "HIGH" | "NORMAL". Separate from `importance` on purpose: importance is a
+    # content judgement, priority is a routing decision.
+    priority:      Mapped[str]  = mapped_column(String(16), default="NORMAL", index=True)
+
     created_at:    Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at:    Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -57,6 +67,18 @@ class TelegramSubscriber(Base):
     high_only:  Mapped[bool]      = mapped_column(default=False)
     # Persistent token the linked app uses to push watchlist updates.
     link_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+    # ── Control-panel filters (set from the app's Telegram settings screen) ──
+    # Master switches per alert kind.
+    news_alerts:      Mapped[bool] = mapped_column(default=True)
+    stockpick_alerts: Mapped[bool] = mapped_column(default=False)
+    # Allow-list of NewsSource values. EMPTY LIST MEANS "all sources" — not
+    # "none" — so existing subscribers keep receiving everything after this
+    # column is added.
+    sources:          Mapped[List[str]] = mapped_column(JSON, default=list)
+    # Screener threshold: only surface picks at/below this RSI (oversold hunting).
+    min_rsi:          Mapped[int] = mapped_column(default=100)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

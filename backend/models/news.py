@@ -58,3 +58,7 @@ class News(BaseModel):
     importance:   NewsImportance  = NewsImportance.MEDIUM
     category:     NewsCategory    = NewsCategory.MARKET_NEWS
     url:          Optional[str]   = None
+    # MSCI index-review flag. Serialised as `isMsciAlert` / `priority` for the
+    # app, which uses it to pin the item and show an urgent badge.
+    is_msci_alert: bool           = False
+    priority:      str            = "NORMAL"

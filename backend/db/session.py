@@ -43,6 +43,17 @@ _MIGRATIONS = [
     "ALTER TABLE telegram_subscriber ADD COLUMN all_news BOOLEAN DEFAULT 0",
     "ALTER TABLE telegram_subscriber ADD COLUMN high_only BOOLEAN DEFAULT 0",
     "ALTER TABLE telegram_subscriber ADD COLUMN link_token VARCHAR(64)",
+    # Control-panel filters. Defaults chosen so existing subscribers are
+    # unaffected: news stays on, stockpicks stay off, empty sources means "all",
+    # and min_rsi=100 excludes nothing.
+    "ALTER TABLE telegram_subscriber ADD COLUMN news_alerts BOOLEAN DEFAULT 1",
+    "ALTER TABLE telegram_subscriber ADD COLUMN stockpick_alerts BOOLEAN DEFAULT 0",
+    "ALTER TABLE telegram_subscriber ADD COLUMN sources JSON",
+    "ALTER TABLE telegram_subscriber ADD COLUMN min_rsi INTEGER DEFAULT 100",
+    # MSCI priority routing. Existing rows default to not-an-MSCI-alert at
+    # NORMAL priority, so back-filling changes nothing for cached news.
+    "ALTER TABLE news ADD COLUMN is_msci_alert BOOLEAN DEFAULT 0",
+    "ALTER TABLE news ADD COLUMN priority VARCHAR(16) DEFAULT 'NORMAL'",
 ]
 
 

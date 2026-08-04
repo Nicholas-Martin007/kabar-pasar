@@ -14,6 +14,8 @@ from sqlalchemy.orm import selectinload
 
 from backend.models.news import News, NewsCategory, NewsImportance, NewsSource
 
+from scrapers.msci_tracker import classify_msci
+
 from .models import AISummaryRow, CommodityPriceRow, NewsRow, TelegramSubscriber
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,9 @@ def _row_to_news(row: NewsRow) -> News:
         ),
         category=NewsCategory(row.category),
         url=row.url,
+        # Rows predating the MSCI columns read back as NULL, not False.
+        is_msci_alert=bool(row.is_msci_alert),
+        priority=row.priority or "NORMAL",
     )
 
 
@@ -56,6 +61,12 @@ async def upsert_news_items(session: AsyncSession, items: List[News]) -> List[Ne
 
     new_items = [n for n in items if n.id not in existing_ids]
     for item in new_items:
+        # Classify at write time so the flag is durable: the alert path, the API
+        # and any later re-read all see the same decision, and re-running the
+        # matcher on every read would be wasted work.
+        msci = classify_msci(item.title, item.excerpt or "")
+        item.is_msci_alert = msci["is_msci_alert"]
+        item.priority = msci["priority"]
         session.add(NewsRow(
             id=item.id,
             title=item.title,
@@ -66,6 +77,8 @@ async def upsert_news_items(session: AsyncSession, items: List[News]) -> List[Ne
             importance=item.importance.value,
             category=item.category.value,
             url=item.url,
+            is_msci_alert=item.is_msci_alert,
+            priority=item.priority,
         ))
     await session.commit()
     logger.info(
@@ -195,17 +208,8 @@ async def remove_subscriber(session: AsyncSession, chat_id: str) -> None:
 
 async def list_subscribers(session: AsyncSession) -> List[Dict[str, Any]]:
     rows = (await session.execute(select(TelegramSubscriber))).scalars().all()
-    return [
-        {
-            "chat_id": r.chat_id,
-            "tickers": list(r.tickers or []),
-            "keywords": list(r.keywords or []),
-            "mute": list(r.mute or []),
-            "all_news": bool(r.all_news),
-            "high_only": bool(r.high_only),
-        }
-        for r in rows
-    ]
+    # Must include the control-panel fields — the dispatcher filters on them.
+    return [_subscriber_dict(r) for r in rows]
 
 
 async def get_subscriber(
@@ -367,6 +371,11 @@ async def get_subscriber_by_token(
     ).scalar_one_or_none()
     if row is None:
         return None
+    return _subscriber_dict(row)
+
+
+def _subscriber_dict(row: TelegramSubscriber) -> Dict[str, Any]:
+    """Single serialisation point so every endpoint returns the same shape."""
     return {
         "chat_id": row.chat_id,
         "tickers": list(row.tickers or []),
@@ -374,6 +383,11 @@ async def get_subscriber_by_token(
         "mute": list(row.mute or []),
         "all_news": bool(row.all_news),
         "high_only": bool(row.high_only),
+        # Control-panel filters. `sources: []` means "all sources", not "none".
+        "news_alerts": bool(getattr(row, "news_alerts", True)),
+        "stockpick_alerts": bool(getattr(row, "stockpick_alerts", False)),
+        "sources": list(getattr(row, "sources", None) or []),
+        "min_rsi": int(getattr(row, "min_rsi", 100) or 100),
     }
 
 
@@ -383,7 +397,17 @@ async def set_prefs_by_token(
     all_news: Optional[bool] = None,
     mute: Optional[List[str]] = None,
     high_only: Optional[bool] = None,
+    news_alerts: Optional[bool] = None,
+    stockpick_alerts: Optional[bool] = None,
+    sources: Optional[List[str]] = None,
+    min_rsi: Optional[int] = None,
+    tickers: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None,
 ) -> bool:
+    """
+    Patch semantics: only non-None fields are written, so the app can send a
+    single toggle without clobbering the rest of the subscriber's settings.
+    """
     row = (
         await session.execute(
             select(TelegramSubscriber).where(
@@ -399,6 +423,19 @@ async def set_prefs_by_token(
         row.mute = sorted({m.strip().lower() for m in mute if m.strip()})
     if high_only is not None:
         row.high_only = bool(high_only)
+    if news_alerts is not None:
+        row.news_alerts = bool(news_alerts)
+    if stockpick_alerts is not None:
+        row.stockpick_alerts = bool(stockpick_alerts)
+    if sources is not None:
+        # Reassign (don't mutate) so SQLAlchemy tracks the JSON change.
+        row.sources = sorted({s.strip() for s in sources if s.strip()})
+    if min_rsi is not None:
+        row.min_rsi = max(0, min(100, int(min_rsi)))
+    if tickers is not None:
+        row.tickers = sorted({t.strip().upper() for t in tickers if t.strip()})
+    if keywords is not None:
+        row.keywords = sorted({k.strip().lower() for k in keywords if k.strip()})
     await session.commit()
     return True
 
@@ -504,3 +541,31 @@ async def commodity_history(
         }
         for r in rows
     ]
+
+
+async def backfill_msci_flags(session: AsyncSession) -> int:
+    """
+    Classify cached news that predates the MSCI columns.
+
+    New items are flagged at insert time, so this only matters once — without
+    it, MSCI articles already in the cache stay silently unflagged and the app
+    shows them as ordinary news. Only rows that MATCH are written, so a second
+    run is a no-op rather than a full table rewrite.
+    """
+    rows = (
+        await session.execute(
+            select(NewsRow).where(NewsRow.is_msci_alert.is_(False))
+        )
+    ).scalars().all()
+
+    updated = 0
+    for row in rows:
+        if classify_msci(row.title or "", row.excerpt or "")["is_msci_alert"]:
+            row.is_msci_alert = True
+            row.priority = "HIGH"
+            updated += 1
+
+    if updated:
+        await session.commit()
+    logger.info("repo.msci_backfill scanned=%d flagged=%d", len(rows), updated)
+    return updated

@@ -42,7 +42,18 @@ import httpx
 
 from backend.models.news import News, NewsSource
 
-from . import bloomberg_technoz, cnbc_indonesia, kontan
+from . import (
+    antara,
+    bisnis_indonesia,
+    bloomberg_technoz,
+    cnbc_global,
+    cnbc_indonesia,
+    detik,
+    katadata,
+    kontan,
+    liputan6,
+    yahoo_finance,
+)
 from .base import parse_feed_bytes
 
 logger = logging.getLogger(__name__)
@@ -57,31 +68,65 @@ _TIMEOUT = 12
 _BASE_INTERVAL = max(5, int(os.getenv("FAST_POLL_SECONDS", "30")))
 _ENABLED = os.getenv("FAST_POLL_ENABLED", "1") != "0"
 
+# Floor for feeds that send NEITHER ETag nor Last-Modified. Conditional GET is
+# what makes frequent polling cheap — a validated feed answers 304 in ~200
+# bytes. A feed with no validators hands back the whole document every single
+# time, so polling it at the same rate multiplies real bandwidth on their side
+# for no gain. Those get backed off to this instead.
+_NO_VALIDATOR_INTERVAL = max(
+    _BASE_INTERVAL, int(os.getenv("FAST_POLL_UNCACHED_SECONDS", "90"))
+)
+
 _MAX_BACKOFF = 900.0        # 15 min ceiling for a persistently failing feed
 _BACKOFF_FACTOR = 2.0
 _JITTER = 0.25              # ±25% so feeds don't sync up into a thundering herd
 
-# The fast lane deliberately covers only feeds that actually break news often.
-# Everything else stays on the 5-minute scheduled refresh.
+# Every RSS-backed source now runs in the fast lane. Per-feed pacing is NOT
+# uniform: `poll_feed` raises each feed's own `min_interval` to whatever
+# Cache-Control: max-age the publisher sends, so CNBC Indonesia self-limits to
+# its stated 30s while feeds that send no cache policy use FAST_POLL_SECONDS.
+# Conditional GET means an unchanged feed costs a ~200-byte 304, which is what
+# makes covering this many sources at this cadence reasonable rather than rude.
+#
+# The two HTML scrapers (bei, investor_id) stay OFF the fast lane on purpose:
+# they parse full pages rather than a cached XML file, so they're an order of
+# magnitude heavier per poll and far more fragile. They remain on the 5-minute
+# scheduled refresh.
 FEEDS: List[Tuple[NewsSource, str]] = [
+    # IDX / Indonesian market
     (NewsSource.KONTAN, kontan.FEED_URLS[0]),
     (NewsSource.CNBC_INDONESIA, cnbc_indonesia.FEED_URL),
     (NewsSource.BLOOMBERG_TECHNOZ, bloomberg_technoz.FEED_URL),
+    (NewsSource.DETIK_FINANCE, detik.FEED_URLS[0]),
+    (NewsSource.BISNIS_INDONESIA, bisnis_indonesia.FEED_URLS[0]),
+    (NewsSource.KATADATA, katadata.FEED_URL),
+    (NewsSource.ANTARA, antara.FEEDS[0]),
+    (NewsSource.LIPUTAN6, liputan6.FEEDS[0]),
+    (NewsSource.LIPUTAN6, liputan6.FEEDS[1]),
+    # Global
+    (NewsSource.CNBC_GLOBAL, cnbc_global.FEEDS[2]),      # markets
+    (NewsSource.CNBC_GLOBAL, cnbc_global.FEEDS[1]),      # economy
+    (NewsSource.YAHOO_FINANCE, yahoo_finance.FEEDS[0]),  # top markets
 ]
 
 
 class FeedState:
     """Per-feed conditional-GET validators and backoff bookkeeping."""
 
-    __slots__ = ("etag", "last_modified", "min_interval", "failures", "next_at")
+    __slots__ = (
+        "etag", "last_modified", "min_interval", "failures", "next_at",
+        "uncached_logged",
+    )
 
     def __init__(self) -> None:
         self.etag: Optional[str] = None
         self.last_modified: Optional[str] = None
-        # Raised to the publisher's Cache-Control max-age when they send one.
+        # Raised to the publisher's Cache-Control max-age when they send one,
+        # or to _NO_VALIDATOR_INTERVAL when the feed supports no conditional GET.
         self.min_interval: float = float(_BASE_INTERVAL)
         self.failures: int = 0
         self.next_at: float = 0.0
+        self.uncached_logged: bool = False
 
     def conditional_headers(self) -> Dict[str, str]:
         h: Dict[str, str] = {}
@@ -191,6 +236,20 @@ async def poll_feed(
     # Cache validators for the next request.
     state.etag = resp.headers.get("ETag") or state.etag
     state.last_modified = resp.headers.get("Last-Modified") or state.last_modified
+
+    # No validators means every poll re-downloads the full document. Back this
+    # feed off so we aren't paying (and making them pay) full bandwidth at
+    # conditional-GET cadence. An explicit publisher max-age still wins.
+    if not state.etag and not state.last_modified:
+        state.min_interval = max(state.min_interval, float(_NO_VALIDATOR_INTERVAL))
+        if not state.uncached_logged:
+            state.uncached_logged = True
+            logger.info(
+                "fastpoll.no_validators source=%s interval=%.0fs "
+                "(feed sends no ETag/Last-Modified)",
+                source.value, state.min_interval,
+            )
+
     state.schedule_ok(now)
 
     items = await parse_feed_bytes(source, resp.content)
