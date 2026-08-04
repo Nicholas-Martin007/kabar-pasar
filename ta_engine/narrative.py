@@ -13,6 +13,8 @@ disclaimer travels with it.
 
 from typing import TYPE_CHECKING, List
 
+from .price_utils import format_price
+
 if TYPE_CHECKING:  # avoid a circular import at runtime
     from .chart_generator import ChartResult
 
@@ -50,10 +52,10 @@ def build_rationale(result: "ChartResult") -> str:
         f"📊 <b>{result.ticker}</b> — analisis teknikal harian",
         f"<i>per {result.as_of}</i>",
         "",
-        f"Harga terakhir: <b>{result.last_close:,.2f} {cur}</b>",
+        f"Harga terakhir: <b>{format_price(result.last_close, cur)} {cur}</b>",
         f"• {_trend_phrase(result.last_close, result.ema20, result.ema50)}",
         f"• {_rsi_phrase(result.rsi)}",
-        f"• ATR(14) {result.atr:,.2f} — ukuran volatilitas harian",
+        f"• ATR(14) {format_price(result.atr, cur)} — ukuran volatilitas harian",
         "",
         "<b>Level kunci</b>",
     ]
@@ -72,21 +74,21 @@ def build_rationale(result: "ChartResult") -> str:
         ]
 
     if result.support is not None:
-        lines.append(f"🟢 Support: <b>{result.support:,.2f}</b>")
+        lines.append(f"🟢 Support: <b>{format_price(result.support, cur)}</b>")
     else:
         lines.append("🟢 Support: <i>tidak terdeteksi di bawah harga</i>")
     if result.resistance is not None:
-        lines.append(f"🔴 Resistance: <b>{result.resistance:,.2f}</b>")
+        lines.append(f"🔴 Resistance: <b>{format_price(result.resistance, cur)}</b>")
     else:
         lines.append("🔴 Resistance: <i>tidak terdeteksi di atas harga</i>")
 
     lines += [
         "",
         "<b>Skenario (asumsi posisi BELI)</b>",
-        f"🎯 TP1: <b>{result.tp1:,.2f}</b>  (1:{result.risk_reward_tp1:g})",
-        f"🎯 TP2: <b>{result.tp2:,.2f}</b>  (1:{result.risk_reward_tp2:g})",
-        f"🛑 SL: <b>{result.sl:,.2f}</b>",
-        f"Risiko per lembar: {result.risk_per_share:,.2f} {cur} "
+        f"🎯 TP1: <b>{format_price(result.tp1, cur)}</b>  (1:{result.risk_reward_tp1:g})",
+        f"🎯 TP2: <b>{format_price(result.tp2, cur)}</b>  (1:{result.risk_reward_tp2:g})",
+        f"🛑 SL: <b>{format_price(result.sl, cur)}</b>",
+        f"Risiko per lembar: {format_price(result.risk_per_share, cur)} {cur} "
         f"({result.risk_per_share / result.last_close:.1%} dari harga)",
     ]
 

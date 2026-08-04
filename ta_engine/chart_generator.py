@@ -52,6 +52,13 @@ from .indicators import (  # noqa: E402
     nearest_levels,
 )
 from .pattern_detector import MIN_QUALITY, Pattern, detect_patterns  # noqa: E402
+from .price_utils import (  # noqa: E402
+    format_price,
+    idx_tick_size,
+    is_idx_symbol,
+    round_level,
+    round_to_idx_tick,
+)
 
 # Pattern geometry is drawn in its own palette. Green/red already mean
 # support/TP and resistance/SL on this chart; reusing them for trendlines would
@@ -62,8 +69,10 @@ _PATTERN_NEUTRAL_COLOR = "#A78BFA"
 
 # Blank bars appended to the right of the plot. Without this the newest candles
 # and the TP/SL labels are jammed against the y-axis tick labels and the price
-# projections have nowhere to sit.
-_RIGHT_MARGIN_BARS = 12
+# projections have nowhere to sit. Sized so the longest label
+# ("Resistance 10,200") clears the last candle with visible whitespace either
+# side rather than merely not overlapping it.
+_RIGHT_MARGIN_BARS = 22
 
 # Sentiment palette for the corner badge.
 _SENTIMENT_STYLE = {
@@ -115,19 +124,9 @@ _TP2_R = 3.0
 # sanely — surfaced as a warning rather than silently returned.
 _MAX_RISK_FRACTION = 0.15
 
-# IDX tick size bands (fraksi harga), rupiah. Orders can only be placed on these
-# increments, so a level finer than the tick is not actually tradeable — e.g. a
-# stock pinned at the Rp50 floor can produce a mathematically valid TP that no
-# one can enter. Bands are (exclusive upper bound, tick).
-_IDX_TICK_BANDS = ((200, 1), (500, 2), (2000, 5), (5000, 10), (float("inf"), 25))
-
-
-def _idx_tick_size(price: float) -> int:
-    """Minimum price increment for an IDX-listed stock at `price`."""
-    for upper, tick in _IDX_TICK_BANDS:
-        if price < upper:
-            return tick
-    return 25
+# Tick logic lives in price_utils — one grid definition for the whole system,
+# so a level can't be valid on the chart and invalid in the Telegram caption.
+_idx_tick_size = idx_tick_size
 
 
 @dataclass
@@ -207,6 +206,7 @@ def _compute_trade_levels(
     atr: float,
     support: Optional[Level],
     resistance: Optional[Level],
+    ticker: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Stop below structure, targets at fixed R multiples.
@@ -233,6 +233,15 @@ def _compute_trade_levels(
             "with no structural level backing it."
         )
 
+    # Snap the stop onto the IDX grid BEFORE deriving anything from it, then
+    # recompute risk from the rounded value. Rounding the stop afterwards would
+    # silently break the 1:2 guarantee: a stop nudged toward entry shrinks the
+    # real risk denominator while the targets stay where they were. Floor, not
+    # nearest, so the snap can only widen the stop — never tighten it into the
+    # noise it was sized to survive.
+    if is_idx_symbol(ticker):
+        sl = float(round_to_idx_tick(sl, "floor"))
+
     risk = entry - sl
     if risk <= 0 or not math.isfinite(risk):
         raise ValueError(
@@ -241,6 +250,11 @@ def _compute_trade_levels(
 
     tp1 = entry + _TP1_R * risk
     tp2 = entry + _TP2_R * risk
+
+    # Ceil for targets, so rounding never shaves reward below the R multiple.
+    if is_idx_symbol(ticker):
+        tp1 = float(round_to_idx_tick(tp1, "ceil"))
+        tp2 = float(round_to_idx_tick(tp2, "ceil"))
 
     risk_fraction = risk / entry
     if risk_fraction > _MAX_RISK_FRACTION:
@@ -403,18 +417,27 @@ def _render_chart(
                     min(want_hi, y_hi + limit),
                 )
 
+            # IDX prices show as clean integers — sub-rupiah decimals aren't
+            # tradeable and imply precision the tick grid doesn't allow.
+            cur = "IDR" if is_idx_symbol(ticker) else "USD"
+            fmt = lambda v: format_price(v, cur)  # noqa: E731
+
             annotations = [
-                (levels["tp2"], f"TP2 {levels['tp2']:,.2f}", "#22C55E"),
-                (levels["tp1"], f"TP1 {levels['tp1']:,.2f}", "#22C55E"),
-                (levels["sl"], f"SL {levels['sl']:,.2f}", "#F43F5E"),
+                (levels["tp2"], f"TP2 {fmt(levels['tp2'])}", "#22C55E"),
+                (levels["tp1"], f"TP1 {fmt(levels['tp1'])}", "#22C55E"),
+                (levels["sl"], f"SL {fmt(levels['sl'])}", "#F43F5E"),
             ]
+            # Snap S/R for display the same way the payload does. Formatting the
+            # raw level instead would print a number like 4,184 that is not a
+            # legal Rp10 tick, and would disagree with the 4,180 the API returns
+            # for the same line.
             if support is not None:
-                annotations.append(
-                    (support.price, f"Support {support.price:,.2f}", "#22C55E")
-                )
+                sup_px = round_level(support.price, ticker)
+                annotations.append((support.price, f"Support {fmt(sup_px)}", "#22C55E"))
             if resistance is not None:
+                res_px = round_level(resistance.price, ticker)
                 annotations.append(
-                    (resistance.price, f"Resistance {resistance.price:,.2f}", "#F43F5E")
+                    (resistance.price, f"Resistance {fmt(res_px)}", "#F43F5E")
                 )
 
             # Support / resistance / SL routinely land within a few percent of
@@ -422,8 +445,19 @@ def _render_chart(
             # unreadable smear. Nudge each label up until it clears the previous
             # one — the dashed line still marks the true price, the text just
             # gets breathing room.
+            #
+            # The gap is sized against FONT HEIGHT, not a fixed fraction of the
+            # price range: during a tight consolidation the y-range collapses and
+            # a percentage gap shrinks with it, so labels would re-collide
+            # exactly when the levels are closest together and legibility matters
+            # most. Converting the text height back into data units keeps the
+            # separation constant on screen at any zoom.
             y_lo, y_hi = ax.get_ylim()
-            min_gap = (y_hi - y_lo) * 0.028
+            fig_h_px = fig.get_size_inches()[1] * fig.dpi
+            ax_frac = ax.get_position().height
+            px_per_data = (fig_h_px * ax_frac) / max(y_hi - y_lo, 1e-9)
+            label_px = 13.0                      # ~8pt text plus padding
+            min_gap = max(label_px / max(px_per_data, 1e-9), (y_hi - y_lo) * 0.030)
             placed: List[float] = []
             for price, label, color in sorted(annotations, key=lambda a: a[0]):
                 y = price
@@ -435,7 +469,9 @@ def _render_chart(
                     label,
                     xy=(1.0, y),
                     xycoords=("axes fraction", "data"),
-                    xytext=(-6, 1),
+                    # Sit inside the blank right margin with real whitespace on
+                    # both sides, rather than hugging the axis edge.
+                    xytext=(-14, 2),
                     textcoords="offset points",
                     ha="right",
                     va="bottom",
@@ -443,10 +479,10 @@ def _render_chart(
                     color=color,
                     weight="bold",
                     bbox=dict(
-                        boxstyle="round,pad=0.22",
+                        boxstyle="round,pad=0.34",
                         facecolor="#0F1521",
                         edgecolor="none",
-                        alpha=0.75,
+                        alpha=0.88,
                     ),
                 )
 
@@ -553,7 +589,7 @@ def _analyse_timeframe(
         raise ValueError(f"ATR is {atr} for {symbol} @{interval} — cannot size a stop")
 
     support, resistance = nearest_levels(entry, build_levels(df, atr))
-    trade = _compute_trade_levels(entry, atr, support, resistance)
+    trade = _compute_trade_levels(entry, atr, support, resistance, ticker=symbol)
     patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
 
     return _TimeframeAnalysis(
@@ -684,11 +720,14 @@ def generate_chart(
         ticker=symbol,
         chart_path=str(out_path),
         last_close=round(entry, 4),
-        support=round(support.price, 4) if support else None,
-        resistance=round(resistance.price, 4) if resistance else None,
-        tp1=round(trade["tp1"], 4),
-        tp2=round(trade["tp2"], 4),
-        sl=round(trade["sl"], 4),
+        # Support/resistance are descriptive, so nearest is right for them.
+        # tp/sl were already snapped directionally inside _compute_trade_levels
+        # — round_level here is a no-op for IDX and preserves floats elsewhere.
+        support=round_level(support.price, symbol) if support else None,
+        resistance=round_level(resistance.price, symbol) if resistance else None,
+        tp1=round_level(trade["tp1"], symbol),
+        tp2=round_level(trade["tp2"], symbol),
+        sl=round_level(trade["sl"], symbol),
         rsi=round(rsi, 2),
         atr=round(atr, 4),
         ema20=round(float(last["ema20"]), 4),
