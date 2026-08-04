@@ -14,6 +14,7 @@ import asyncio
 import html
 import json
 import logging
+import re
 import os
 import secrets
 import time
@@ -70,7 +71,9 @@ HELP = (
     "/follow emas — hanya topik tertentu\n"
     "/unwatch · /unfollow — kebalikannya\n\n"
     "<b>Analisis</b>\n"
-    "/chart BBCA — chart teknikal harian + level TP/SL\n\n"
+    "/ihsg — prospek harian IHSG + chart\n"
+    "/chart BBCA — chart teknikal harian + level TP/SL\n"
+    "/chart IHSG · /chart EMAS · /chart USDIDR — indeks &amp; komoditas\n\n"
     "<b>Lainnya</b>\n"
     "/news 15 — tampilkan N berita terbaru (default 10)\n"
     "/digest — ringkasan berita hari ini\n"
@@ -138,7 +141,7 @@ async def send_photo(
         return False
 
     overflow = len(caption) > _CAPTION_LIMIT
-    short = (caption[: _CAPTION_LIMIT - 1] + "…") if overflow else caption
+    short = _trim_html(caption, _CAPTION_LIMIT) if overflow else caption
 
     url = _API.format(token=_token(), method="sendPhoto")
     data = {"chat_id": chat_id, "parse_mode": "HTML"}
@@ -190,6 +193,83 @@ async def send_chart(chat_id: str, ticker: str) -> bool:
         # Image failed but the analysis is still worth delivering.
         await send_message(chat_id, rationale)
     return ok
+
+
+_TAG_RE = re.compile(r"<(/?)([a-zA-Z]+)[^>]*>")
+
+
+def _trim_html(text: str, limit: int) -> str:
+    """
+    Truncate HTML to `limit` chars without leaving broken markup.
+
+    A plain slice is not safe with parse_mode=HTML: Telegram answers 400 and
+    rejects the whole message if a tag is left open or cut in half. That failure
+    is invisible in normal use because callers fall back to a text message — the
+    photo just silently stops being attached for any caption over the limit.
+
+    Cuts back off a partial tag, then closes whatever is still open, innermost
+    first.
+    """
+    if len(text) <= limit:
+        return text
+
+    # Reserve room for the ellipsis plus a few closing tags.
+    cut = max(0, limit - 24)
+    lt, gt = text.rfind("<", 0, cut), text.rfind(">", 0, cut)
+    if lt > gt:            # the cut landed inside a tag — back up to before it
+        cut = lt
+    head = text[:cut].rstrip()
+
+    open_tags: List[str] = []
+    for m in _TAG_RE.finditer(head):
+        closing, name = m.group(1), m.group(2).lower()
+        if closing:
+            if open_tags and open_tags[-1] == name:
+                open_tags.pop()
+        else:
+            open_tags.append(name)
+
+    return head + "…" + "".join(f"</{t}>" for t in reversed(open_tags))
+
+
+async def send_ihsg_report(chat_id: str) -> bool:
+    """
+    Deliver the IHSG daily prospect: the ^JKSE chart with the market overview
+    as its caption.
+
+    The overview text runs past Telegram's 1024-char caption limit, so the
+    chart carries a trimmed caption and `send_photo` follows up with the full
+    text — otherwise the tail (levels, catalysts, prospect) would be silently
+    dropped by Telegram rather than truncated visibly.
+
+    Imports are lazy for the same reason as `send_chart`: this module loads at
+    startup for the poller and shouldn't drag in matplotlib/pandas.
+    """
+    from backend.services.chart_service import get_chart
+    from backend.services.ihsg_engine import build_ihsg_overview
+
+    from .telegram_sender import format_ihsg_overview
+
+    try:
+        overview = await build_ihsg_overview()
+        caption = format_ihsg_overview(overview.to_dict())
+    except Exception as exc:
+        logger.warning("telegram.ihsg_overview_failed error=%s", exc)
+        await send_message(chat_id, "⚠️ Gagal menyiapkan ringkasan IHSG.")
+        return False
+
+    # The chart is a bonus — if rendering fails the numbers still go out.
+    try:
+        result = await get_chart("^JKSE")
+        ok = await send_photo(chat_id, result.chart_path, caption=caption)
+        if ok:
+            return True
+        logger.info("telegram.ihsg_photo_fallback chat=%s", chat_id)
+    except Exception as exc:
+        logger.warning("telegram.ihsg_chart_failed error=%s", exc)
+
+    await send_message(chat_id, caption)
+    return True
 
 
 async def send_message(
@@ -471,11 +551,25 @@ async def _handle_command(chat_id: str, text: str) -> None:
     # no reason to hold a session across it.
     if cmd == "chart":
         if not arg:
-            await send_message(chat_id, "Format: <code>/chart BBCA</code>")
+            await send_message(
+                chat_id,
+                "Format: <code>/chart BBCA</code>\n"
+                "Indeks & komoditas juga bisa: <code>/chart IHSG</code>, "
+                "<code>/chart EMAS</code>, <code>/chart USDIDR</code>",
+            )
             return
-        symbol = arg if "." in arg else f"{arg}.JK"
+        # resolve_symbol handles IHSG/EMAS-style aliases and only appends ".JK"
+        # to things that actually look like IDX tickers.
+        from ta_engine.price_utils import resolve_symbol
+
+        symbol = resolve_symbol(arg)
         await send_message(chat_id, f"⏳ Membuat chart {html.escape(symbol)}…")
         await send_chart(chat_id, symbol)
+        return
+
+    if cmd == "ihsg":
+        await send_message(chat_id, "⏳ Menyiapkan ringkasan IHSG…")
+        await send_ihsg_report(chat_id)
         return
 
     async with get_session() as session:

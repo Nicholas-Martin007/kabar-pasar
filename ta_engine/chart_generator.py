@@ -681,7 +681,9 @@ def generate_chart(
 
     out_dir = out_dir or _CHART_DIR
     # Symbol goes into a filename — keep it path-safe ("BBCA.JK" -> "BBCA_JK").
-    safe = symbol.replace(".", "_").replace("/", "_")
+    # "^" leads index symbols (^JKSE) and is unsafe in a URL path, so strip it
+    # too rather than emitting "^JKSE_daily.png".
+    safe = symbol.replace(".", "_").replace("/", "_").replace("^", "")
     # Daily keeps the historical "_daily" name so existing links stay valid;
     # other intervals are named for what they actually are. A 4-hour chart
     # sitting in a file called "_daily.png" is a trap for anything that reads
@@ -735,7 +737,13 @@ def generate_chart(
         risk_per_share=round(trade["risk"], 4),
         risk_reward_tp1=round(_TP1_R, 2),
         risk_reward_tp2=round(_TP2_R, 2),
-        currency="IDR" if symbol.endswith(".JK") else "USD",
+        # An index (^JKSE) is quoted in points — neither rupiah nor dollars.
+        # Labelling IHSG "USD" was wrong and made the levels read as a price.
+        currency=(
+            "poin" if symbol.startswith("^")
+            else "IDR" if symbol.endswith(".JK")
+            else "USD"
+        ),
         # 4h bars need the time to be meaningful; daily bars don't.
         as_of=df.index[-1].strftime(
             "%Y-%m-%d %H:%M" if chosen.timeframe != "1d" else "%Y-%m-%d"

@@ -43,6 +43,46 @@ IDX_TICK_BANDS: Sequence[Tuple[float, int]] = (
 IDX_MIN_PRICE = 50
 
 
+# Friendly names people actually type, mapped to Yahoo symbols. Without this,
+# "/chart IHSG" becomes "IHSG.JK" — a symbol that does not exist — and the user
+# gets "no price data" for the most important index on the exchange.
+_SYMBOL_ALIASES = {
+    "IHSG": "^JKSE",
+    "JKSE": "^JKSE",
+    "COMPOSITE": "^JKSE",
+    "IDX": "^JKSE",
+    "LQ45": "^JKLQ45",
+    "EMAS": "GC=F",
+    "GOLD": "GC=F",
+    "MINYAK": "CL=F",
+    "OIL": "CL=F",
+    "USDIDR": "USDIDR=X",
+    "RUPIAH": "USDIDR=X",
+}
+
+
+def resolve_symbol(raw: str) -> str:
+    """
+    Turn user input into a Yahoo symbol.
+
+    Handles the aliases above, leaves anything already qualified (a dot, a "^"
+    or an "=") untouched, and otherwise assumes an IDX ticker needing ".JK".
+    """
+    t = (raw or "").strip().upper()
+    if not t:
+        return t
+    if t in _SYMBOL_ALIASES:
+        return _SYMBOL_ALIASES[t]
+    if "." in t or t.startswith("^") or "=" in t:
+        return t
+    return f"{t}.JK"
+
+
+def is_index_symbol(ticker: Optional[str]) -> bool:
+    """Yahoo index symbols lead with "^" and are quoted in points."""
+    return bool(ticker) and ticker.strip().startswith("^")
+
+
 def is_idx_symbol(ticker: Optional[str]) -> bool:
     """True for Jakarta-listed symbols, which are the only ones with fraksi harga."""
     if not ticker:
