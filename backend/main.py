@@ -17,7 +17,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from backend.db.repository import backfill_msci_flags  # noqa: E402
+from backend.db.repository import backfill_msci_flags, backfill_tickers  # noqa: E402
 from backend.db.session import dispose as db_dispose  # noqa: E402
 from backend.db.session import get_session  # noqa: E402
 from backend.db.session import init_db  # noqa: E402
@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
     try:
         async with get_session() as session:
             await backfill_msci_flags(session)
+            # Re-tag articles stored before a company name was known.
+            await backfill_tickers(session)
     except Exception as exc:
         logger.warning("app.msci_backfill_failed error=%s", exc)
     # Worker pool first: the scheduler and pollers below hand work to it, and a

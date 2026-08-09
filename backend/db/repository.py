@@ -569,3 +569,37 @@ async def backfill_msci_flags(session: AsyncSession) -> int:
         await session.commit()
     logger.info("repo.msci_backfill scanned=%d flagged=%d", len(rows), updated)
     return updated
+
+
+async def backfill_tickers(session: AsyncSession) -> int:
+    """
+    Re-run ticker detection over cached news that has none.
+
+    Detection is applied at insert time, so articles stored before a company
+    name was added to TICKER_KEYWORDS keep an empty ticker list forever — and
+    stay invisible to watchlist alerts and the volume/news linkage. Only rows
+    that gain a ticker are written, so repeat runs are no-ops.
+
+    Deliberately does NOT revisit rows that already have tickers: re-detection
+    could only remove one, and silently un-tagging an article that already
+    triggered an alert would be worse than leaving it.
+    """
+    from backend.services.ticker_service import detect_tickers
+
+    rows = (
+        await session.execute(
+            select(NewsRow).where(NewsRow.tickers == [])
+        )
+    ).scalars().all()
+
+    updated = 0
+    for row in rows:
+        found = detect_tickers(f"{row.title or ''} {row.excerpt or ''}")
+        if found:
+            row.tickers = found
+            updated += 1
+
+    if updated:
+        await session.commit()
+    logger.info("repo.ticker_backfill scanned=%d tagged=%d", len(rows), updated)
+    return updated

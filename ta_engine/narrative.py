@@ -120,6 +120,33 @@ def build_rationale(result: "ChartResult") -> str:
             f"→ proyeksi <b>{format_price(result.pattern_target, cur)}</b>",
         ]
 
+    # Valuation, so the reader sees whether the chart is attached to a business
+    # that earns money. Metrics that failed validation are simply absent — see
+    # ta_engine.fundamentals on why bad vendor data is dropped, not shown.
+    if result.fundamentals_summary:
+        lines += ["", "<b>Fundamental</b>", f"🏦 {result.fundamentals_summary}"]
+        f = result.fundamentals or {}
+        if f.get("suppressed"):
+            lines.append(
+                f"<i>Tidak ditampilkan ({', '.join(f['suppressed'])}): data "
+                f"penyedia di luar rentang wajar.</i>"
+            )
+
+    # Momentum divergence — an exhaustion warning, explicitly not a reversal
+    # call, because divergence can persist for weeks in a strong trend.
+    if result.rsi_divergence:
+        d = result.rsi_divergence
+        icon = "🔴" if d["direction"] == "bearish" else "🟢"
+        lines += [
+            "",
+            f"{icon} <b>{d['type']}</b>",
+            f"   {d['from']['date']} RSI {d['from']['rsi']:.0f} → "
+            f"{d['to']['date']} RSI {d['to']['rsi']:.0f} "
+            f"(harga bergerak berlawanan)",
+            "<i>Divergensi = peringatan momentum melemah, bukan sinyal balik "
+            "arah. Konfirmasi tetap dari harga.</i>",
+        ]
+
     # Volume + news: the "why" behind the chart. Worded as coincidence, never
     # causation — a same-day headline is temporal overlap, not proof.
     events = [e for e in (result.volume_events or [])][:3]

@@ -133,10 +133,38 @@ async def attach_news_context(result: ChartResult, ticker: str) -> ChartResult:
     return result
 
 
+async def attach_fundamentals(result: ChartResult, ticker: str) -> ChartResult:
+    """
+    Add the valuation snapshot. Blocking yfinance `.info`, so it runs in a
+    thread; failures are swallowed because a chart without fundamentals is
+    still a correct chart.
+
+    Skipped for indices — an index has no PER or book value.
+    """
+    from ta_engine.fundamentals import fetch_fundamentals, summarise
+    from ta_engine.price_utils import is_index_symbol
+
+    if is_index_symbol(ticker):
+        return result
+    try:
+        f = await asyncio.to_thread(fetch_fundamentals, ticker)
+    except Exception as exc:
+        logger.warning("chart.fundamentals_failed ticker=%s error=%s", ticker, exc)
+        return result
+
+    result.fundamentals = f.to_dict()
+    result.fundamentals_summary = summarise(f)
+    if f.suppressed:
+        logger.info("chart.fundamentals_suppressed ticker=%s fields=%s",
+                    ticker, list(f.suppressed))
+    return result
+
+
 async def get_chart_with_rationale(
     ticker: str, force: bool = False
 ) -> Tuple[ChartResult, str]:
     """Chart plus its plain-language technical summary (HTML, Telegram-ready)."""
     result = await get_chart(ticker, force=force)
     result = await attach_news_context(result, ticker)
+    result = await attach_fundamentals(result, ticker)
     return result, build_rationale(result)

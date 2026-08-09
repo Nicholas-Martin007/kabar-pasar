@@ -51,7 +51,12 @@ from .indicators import (  # noqa: E402
     build_levels,
     nearest_levels,
 )
-from .pattern_detector import MIN_QUALITY, Pattern, detect_patterns  # noqa: E402
+from .pattern_detector import (  # noqa: E402
+    MIN_QUALITY,
+    Pattern,
+    detect_patterns,
+    detect_rsi_divergence,
+)
 from .news_context import find_volume_spikes  # noqa: E402
 from .price_utils import (  # noqa: E402
     format_price,
@@ -184,6 +189,15 @@ class ChartResult:
     # itself stays offline-testable.
     volume_events: List[Dict[str, Any]] = field(default_factory=list)
     volume_summary: Optional[str] = None
+
+    # Momentum divergence, when present. An exhaustion warning, not a
+    # reversal signal — divergence can persist through a strong trend.
+    rsi_divergence: Optional[Dict[str, Any]] = None
+
+    # Valuation snapshot. Filled by chart_service (network call); every
+    # metric is bounds-checked, see ta_engine.fundamentals.
+    fundamentals: Optional[Dict[str, Any]] = None
+    fundamentals_summary: Optional[str] = None
 
     disclaimer: str = DISCLAIMER
 
@@ -803,6 +817,7 @@ def generate_chart(
     # Volume spikes are found here; the headlines that explain them are
     # attached downstream where the news cache is reachable.
     volume_events = find_volume_spikes(df)
+    divergence = detect_rsi_divergence(df)
     pattern_levels = (best.key_levels if best else {}) or {}
 
     _render_chart(
@@ -874,6 +889,7 @@ def generate_chart(
         pattern_target=round_level(pattern_levels.get("target"), symbol),
         pattern_breakout=round_level(pattern_levels.get("breakout_level"), symbol),
         volume_events=[e.to_dict() for e in volume_events],
+        rsi_divergence=divergence,
     )
 
     logger.info(

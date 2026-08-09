@@ -1050,3 +1050,95 @@ def detect_pattern_summary(
         "direction": best.direction,
         "key_levels": best.key_levels,
     }
+
+
+# ── RSI divergence ───────────────────────────────────────────────────────────
+
+# Pivots closer together than this can't form a meaningful divergence — the two
+# legs need to be distinct swings, not adjacent noise.
+_DIV_MIN_BARS = 8
+# Beyond this the two swings belong to different market phases and pairing them
+# says nothing about current momentum.
+_DIV_MAX_BARS = 60
+# RSI must differ by at least this much for the divergence to be real rather
+# than rounding.
+_DIV_MIN_RSI_GAP = 3.0
+
+
+def detect_rsi_divergence(
+    df: pd.DataFrame, lookback: int = 90, rsi_col: str = "rsi14"
+) -> Optional[Dict[str, Any]]:
+    """
+    Classic momentum divergence between price and RSI.
+
+    Bearish: price prints a HIGHER high while RSI prints a LOWER high — the
+    move is being made on weakening momentum. Bullish is the mirror on lows.
+
+    Uses the same confirmed pivots as the pattern engine, so a divergence never
+    rests on an unconfirmed swing that the next candle erases. Returns the most
+    recent qualifying instance, or None.
+
+    This is an exhaustion *warning*, not a reversal signal: divergence can
+    persist for a long time in a strong trend, and price is the thing that
+    ultimately confirms or refutes it.
+    """
+    if rsi_col not in df.columns or len(df) < 30:
+        return None
+
+    window = df.tail(lookback)
+    pivots = find_pivots(window)
+    if len(pivots) < 4:
+        return None
+
+    rsi = window[rsi_col]
+    idx_of = {p.idx: p for p in pivots}
+
+    def rsi_at(pos: int) -> Optional[float]:
+        try:
+            v = float(rsi.iloc[pos])
+            return v if np.isfinite(v) else None
+        except Exception:
+            return None
+
+    best: Optional[Dict[str, Any]] = None
+    for kind, name, direction in (
+        ("high", "Bearish RSI Divergence", "bearish"),
+        ("low", "Bullish RSI Divergence", "bullish"),
+    ):
+        same = [p for p in pivots if p.kind == kind]
+        # Newest pair first — a stale divergence is not actionable.
+        for a, b in zip(reversed(same[:-1]), reversed(same[1:])):
+            gap = b.idx - a.idx
+            if not (_DIV_MIN_BARS <= gap <= _DIV_MAX_BARS):
+                continue
+            ra, rb = rsi_at(a.idx), rsi_at(b.idx)
+            if ra is None or rb is None or abs(rb - ra) < _DIV_MIN_RSI_GAP:
+                continue
+
+            if kind == "high":
+                diverges = b.price > a.price and rb < ra
+            else:
+                diverges = b.price < a.price and rb > ra
+            if not diverges:
+                continue
+
+            cand = {
+                "type": name,
+                "direction": direction,
+                "from": {"date": _to_dt(a.ts).strftime("%Y-%m-%d"),
+                         "price": round(a.price, 4), "rsi": round(ra, 2)},
+                "to": {"date": _to_dt(b.ts).strftime("%Y-%m-%d"),
+                       "price": round(b.price, 4), "rsi": round(rb, 2)},
+                "rsi_gap": round(abs(rb - ra), 2),
+                "bars_apart": gap,
+            }
+            if best is None or cand["to"]["date"] > best["to"]["date"]:
+                best = cand
+            break  # newest qualifying pair for this side is enough
+
+    if best:
+        logger.info(
+            "patterns.divergence type=%s gap=%.1f bars=%d",
+            best["type"], best["rsi_gap"], best["bars_apart"],
+        )
+    return best

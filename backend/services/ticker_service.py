@@ -41,7 +41,11 @@ TICKER_KEYWORDS: Dict[str, List[str]] = {
     "SCMA": ["scma", "surya citra media", "sctv"],
     "EMTK": ["emtk", "elang mahkota teknologi"],
     "BUMI": ["bumi", "bumi resources"],
-    "BRPT": ["brpt", "barito pacific", "barito"],
+    # Bare "barito" is deliberately NOT an alias: it is shared by BRPT (Barito
+    # Pacific) and BREN (Barito Renewables), so "Barito Renewables catat
+    # kinerja" tagged BOTH — attaching the wrong ticker to a story is worse
+    # than attaching none, because alerts and the news/volume linkage act on it.
+    "BRPT": ["brpt", "barito pacific"],
     "TPIA": ["tpia", "chandra asri", "chandra asri petrochemical"],
     "INCO": ["inco", "vale indonesia", "vale"],
     "MDKA": ["mdka", "merdeka copper gold"],
@@ -59,6 +63,67 @@ TICKER_KEYWORDS: Dict[str, List[str]] = {
     "BJTM": ["bjtm", "bank jatim", "bank pembangunan daerah jawa timur"],
     "BJBR": ["bjbr", "bank bjb", "bank pembangunan daerah jawa barat"],
     "BNLI": ["bnli", "bank permata", "permata"],
+
+    # ── Second batch ─────────────────────────────────────────────────────────
+    # Indonesian financial headlines name the company far more often than the
+    # code ("Petrosea raih kontrak", not "PTRO raih kontrak"), so a code-only
+    # entry is effectively undetectable in ordinary news. Measured before this
+    # batch: 150 of 200 known codes had no alias, and only 9% of cached articles
+    # carried any ticker at all — which capped both watchlist alerts and the
+    # volume/news linkage.
+    "PTRO": ["ptro", "petrosea"],
+    # "dewa" = "god", and appears in personal/place names.
+    "DEWA": ["darma henwa"],
+    "AADI": ["aadi", "adaro andalan"],
+    "ADMR": ["admr", "adaro minerals"],
+    "AMMN": ["ammn", "amman mineral"],
+    "BYAN": ["byan", "bayan resources"],
+    "HRUM": ["hrum", "harum energy"],
+    "DOID": ["doid", "delta dunia"],
+    "BRMS": ["brms", "bumi resources minerals"],
+    "NCKL": ["nckl", "trimegah bangun persada", "harita nickel"],
+    "MBMA": ["mbma", "merdeka battery"],
+    # "cuan" is slang for profit and appears constantly in market copy —
+    # name-only. The uppercase code still matches via the code path.
+    "CUAN": ["petrindo jaya", "petrindo"],
+    "UNTR": ["untr", "united tractors"],
+    "ELSA": ["elsa", "elnusa"],
+    "ESSA": ["essa", "essa industries"],
+    "AKRA": ["akra", "akr corporindo"],
+    "SRTG": ["srtg", "saratoga"],
+    "ARTO": ["arto", "bank jago"],
+    "BRIS": ["bris", "bank syariah indonesia", "bsi"],
+    "BBTN": ["bbtn", "bank tabungan negara", "bank btn"],
+    "BDMN": ["bdmn", "bank danamon", "danamon"],
+    # "buka" = "open" in Indonesian; 76 false hits in the live cache.
+    "BUKA": ["bukalapak"],
+    # "beli" = "buy"; 29 false hits.
+    "BELI": ["global digital niaga", "blibli"],
+    "BIRD": ["bird", "blue bird"],
+    "BSDE": ["bsde", "bumi serpong damai"],
+    "CTRA": ["ctra", "ciputra development", "ciputra"],
+    "PWON": ["pwon", "pakuwon jati", "pakuwon"],
+    "SMRA": ["smra", "summarecon agung", "summarecon"],
+    "PANI": ["pantai indah kapuk"],
+    "CPIN": ["cpin", "charoen pokphand"],
+    "JPFA": ["jpfa", "japfa comfeed", "japfa"],
+    "MYOR": ["myor", "mayora indah", "mayora"],
+    "CMRY": ["cmry", "cisarua mountain dairy", "cimory"],
+    "EXCL": ["excl", "xl axiata"],
+    "ISAT": ["isat", "indosat", "indosat ooredoo"],
+    "TOWR": ["towr", "sarana menara nusantara", "protelindo"],
+    "INKP": ["inkp", "indah kiat"],
+    "TKIM": ["tkim", "tjiwi kimia"],
+    "INTP": ["intp", "indocement"],
+    "TAPG": ["tapg", "triputra agro persada"],
+    # "raja" = "king".
+    "RAJA": ["rukun raharja"],
+    "DCII": ["dcii", "dci indonesia"],
+    "DSSA": ["dssa", "dian swastatika"],
+    "LPPF": ["lppf", "matahari department store"],
+    "RALS": ["rals", "ramayana lestari"],
+    "PNLF": ["pnlf", "panin financial"],
+    "TINS": ["tins", "timah"],
 }
 
 # ── Broader IDX ticker universe (code-only detection) ────────────────────────
