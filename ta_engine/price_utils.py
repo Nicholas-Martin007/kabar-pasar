@@ -179,3 +179,120 @@ def format_price(price: Optional[float], currency: str = "IDR") -> str:
     if currency == "IDR":
         return f"{int(round(price)):,}"
     return f"{price:,.2f}"
+
+
+# ── Entry planning ───────────────────────────────────────────────────────────
+
+# How far above support the ideal accumulation band extends, in ATR.
+ENTRY_BAND_ATR = 0.75
+# Beyond this distance from support, price has run and buying here is chasing
+# rather than accumulating.
+EXTENDED_ATR = 1.5
+
+
+def build_entry_plan(
+    close: float,
+    atr: float,
+    support: Optional[float],
+    stop_loss: Optional[float],
+    tp1: Optional[float],
+    ticker: Optional[str] = None,
+    direction: str = "long",
+    breakout_level: Optional[float] = None,
+) -> dict:
+    """
+    Where to actually get in — the piece a target and a stop are useless without.
+
+    Returns a zone (low/high), an optional breakout trigger, a plain-language
+    note, and the risk/reward **recomputed at the entry**.
+
+    That last part is the whole reason this isn't a one-liner. TP1/TP2/SL are
+    derived from the last close, so quoting any other entry silently changes the
+    ratio: filling nearer support shrinks the risk leg and improves R/R, while
+    chasing a run-up worsens it. Reporting the headline 1:2 next to a different
+    entry price would be quietly wrong, so `rr_at_entry` is computed from the
+    zone midpoint and returned alongside.
+
+    A bearish frame or an index gets no buy zone at all — inventing an entry for
+    a setup that points down, or for an instrument retail cannot hold, is worse
+    than saying nothing.
+    """
+    out = {
+        "entry_low": None,
+        "entry_high": None,
+        "entry_type": "none",
+        "breakout_trigger": None,
+        "rr_at_entry": None,
+        "note": None,
+        "extended": False,
+    }
+
+    if direction != "long" or not atr or atr <= 0:
+        out["note"] = (
+            "Tidak ada zona beli — struktur mengarah turun, tunggu konfirmasi."
+            if direction == "short"
+            else None
+        )
+        return out
+
+    idx = is_idx_symbol(ticker)
+
+    def snap(v: float, mode: str) -> float:
+        return float(round_to_idx_tick(v, mode)) if idx else round(v, 2)
+
+    # The band sits just above support: that is where risk is smallest and the
+    # invalidation is closest, which is the definition of a good entry.
+    if support is not None and support < close:
+        low = snap(support, "ceil")
+        # Cap the top of the band at the market. The raw band is
+        # support + 0.75*ATR, which can sit ABOVE the current price when price
+        # is already hugging support — and a zone whose midpoint is above the
+        # market is not an accumulation zone, it is an instruction to pay up.
+        # Left uncapped this produced BMRI "ideal buy 4,220-4,290" with the
+        # stock at 4,240, and an R/R at entry of 1.74 versus the headline 2.0:
+        # the "ideal" entry was measurably worse than just buying.
+        raw_high = min(support + ENTRY_BAND_ATR * atr, close)
+        high = snap(raw_high, "floor")
+        if high <= low:
+            # Support and price are within one tick — the zone collapses to the
+            # market, which is the honest answer rather than an invented spread.
+            high = snap(close, "floor")
+            low = min(low, high)
+        distance_atr = (close - support) / atr
+        extended = distance_atr > EXTENDED_ATR
+    else:
+        # No support below price — anchor the band on ATR beneath the close so
+        # there is still a defined level rather than "buy anywhere".
+        low = snap(close - ENTRY_BAND_ATR * atr, "ceil")
+        high = snap(close, "floor")
+        extended = False
+
+    out["entry_low"], out["entry_high"] = low, high
+    out["extended"] = extended
+
+    mid = (low + high) / 2.0
+    if stop_loss is not None and tp1 is not None and mid > stop_loss:
+        risk = mid - stop_loss
+        if risk > 0:
+            out["rr_at_entry"] = round((tp1 - mid) / risk, 2)
+
+    if breakout_level is not None and breakout_level > close:
+        out["breakout_trigger"] = snap(breakout_level, "ceil")
+
+    if extended:
+        out["entry_type"] = "pullback"
+        out["note"] = (
+            "Harga sudah jauh di atas zona ideal — masuk di sini artinya "
+            "mengejar. Lebih baik tunggu pullback ke zona."
+        )
+    elif low <= close <= high:
+        out["entry_type"] = "market"
+        out["note"] = "Harga sedang berada di dalam zona beli ideal."
+    elif close < low:
+        out["entry_type"] = "breakout"
+        out["note"] = "Harga di bawah zona — tunggu harga kembali ke zona atau breakout."
+    else:
+        out["entry_type"] = "pullback"
+        out["note"] = "Tunggu pullback ke zona untuk risiko lebih kecil."
+
+    return out

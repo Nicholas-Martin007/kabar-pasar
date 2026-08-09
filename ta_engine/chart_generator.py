@@ -63,6 +63,7 @@ from .price_utils import (  # noqa: E402
     idx_tick_size,
     is_idx_symbol,
     is_index_symbol,
+    build_entry_plan,
     round_level,
     round_to_idx_tick,
 )
@@ -194,6 +195,17 @@ class ChartResult:
     # and bad alike. Independent of volume: conviction needs the news even
     # on a quiet day. Populated by chart_service.
     recent_news: List[Dict[str, Any]] = field(default_factory=list)
+
+    # ── Entry plan ───────────────────────────────────────────────────────
+    # Where to get in. `rr_at_entry` is recomputed at the zone rather than
+    # reusing the headline 1:2, which was derived from the last close.
+    entry_low: Optional[float] = None
+    entry_high: Optional[float] = None
+    entry_type: str = "none"          # market | pullback | breakout | none
+    breakout_trigger: Optional[float] = None
+    rr_at_entry: Optional[float] = None
+    entry_note: Optional[str] = None
+    entry_extended: bool = False
 
     # Momentum divergence, when present. An exhaustion warning, not a
     # reversal signal — divergence can persist through a strong trend.
@@ -397,6 +409,7 @@ def _render_chart(
     timeframe: str = "1d",
     sentiment: str = "NEUTRAL",
     volume_events: Optional[List[Any]] = None,
+    entry_plan: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Candlestick + EMA overlays + green (support/TP) and red (resistance/SL) lines."""
     plot_df = df.tail(plot_bars)
@@ -507,6 +520,17 @@ def _render_chart(
             cur = "IDR" if is_idx_symbol(ticker) else "USD"
             fmt = lambda v: format_price(v, cur)  # noqa: E731
 
+            # Shade the accumulation zone. A band reads as "anywhere in
+            # here", which is what an entry range means — a single line would
+            # imply a precision the zone deliberately does not have.
+            plan = entry_plan or {}
+            if show_trade and plan.get("entry_low") and plan.get("entry_high"):
+                lo, hi = plan["entry_low"], plan["entry_high"]
+                if hi <= lo:            # collapsed zone: give it visible height
+                    pad = max((y_hi - y_lo) * 0.004, 1e-9)
+                    lo, hi = lo - pad, hi + pad
+                ax.axhspan(lo, hi, color="#22C55E", alpha=0.13, zorder=0)
+
             annotations = []
             if show_trade:
                 # Colour by what the level MEANS in this frame: in a
@@ -515,7 +539,19 @@ def _render_chart(
                 short = levels.get("direction") == "short"
                 tp_c = "#F43F5E" if short else "#22C55E"
                 sl_c = "#22C55E" if short else "#F43F5E"
-                annotations = [
+                if plan.get("entry_low") and plan.get("entry_high"):
+                    zl, zh = plan["entry_low"], plan["entry_high"]
+                    label = (
+                        f"BELI {fmt(zl)}" if zl == zh
+                        else f"BELI {fmt(zl)}–{fmt(zh)}"
+                    )
+                    annotations.append(((zl + zh) / 2.0, label, "#22C55E"))
+                if plan.get("breakout_trigger"):
+                    annotations.append(
+                        (plan["breakout_trigger"],
+                         f"Breakout {fmt(plan['breakout_trigger'])}", "#22D3EE")
+                    )
+                annotations += [
                     (levels["tp2"], f"TP2 {fmt(levels['tp2'])}", tp_c),
                     (levels["tp1"], f"TP1 {fmt(levels['tp1'])}", tp_c),
                     (levels["sl"], f"SL {fmt(levels['sl'])}", sl_c),
@@ -825,10 +861,23 @@ def generate_chart(
     divergence = detect_rsi_divergence(df)
     pattern_levels = (best.key_levels if best else {}) or {}
 
+    # Built before rendering: the chart draws the zone, so the plan has to
+    # exist first.
+    plan = build_entry_plan(
+        close=entry,
+        atr=atr,
+        support=support.price if support else None,
+        stop_loss=None if is_index else trade["sl"],
+        tp1=None if is_index else trade["tp1"],
+        ticker=symbol,
+        direction="none" if is_index else trade.get("direction", "long"),
+        breakout_level=pattern_levels.get("breakout_level"),
+    )
+
     _render_chart(
         df, symbol, trade, support, resistance, out_path, plot_bars, patterns,
         timeframe=chosen.timeframe, sentiment=sentiment,
-        volume_events=volume_events,
+        volume_events=volume_events, entry_plan=plan,
     )
 
     warnings = list(trade["warnings"])
@@ -893,6 +942,13 @@ def generate_chart(
         trade_direction="none" if is_index else trade.get("direction", "long"),
         pattern_target=round_level(pattern_levels.get("target"), symbol),
         pattern_breakout=round_level(pattern_levels.get("breakout_level"), symbol),
+        entry_low=plan["entry_low"],
+        entry_high=plan["entry_high"],
+        entry_type=plan["entry_type"],
+        breakout_trigger=plan["breakout_trigger"],
+        rr_at_entry=plan["rr_at_entry"],
+        entry_note=plan["note"],
+        entry_extended=plan["extended"],
         volume_events=[e.to_dict() for e in volume_events],
         rsi_divergence=divergence,
     )

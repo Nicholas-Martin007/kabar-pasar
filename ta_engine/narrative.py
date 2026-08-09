@@ -113,6 +113,33 @@ def build_rationale(result: "ChartResult") -> str:
                 "turun &amp; batas invalidasi, bukan ajakan jual.</i>"
             )
 
+    # Where to actually get in. A target and a stop are unusable without it,
+    # and the R/R quoted here is recomputed AT the zone — the headline 1:2 was
+    # derived from the last close, so reusing it beside a different entry price
+    # would be quietly wrong.
+    if result.entry_low is not None and result.entry_high is not None:
+        lo = format_price(result.entry_low, cur)
+        hi = format_price(result.entry_high, cur)
+        zone = f"<b>{lo}</b>" if result.entry_low == result.entry_high else f"<b>{lo} – {hi}</b>"
+        lines += ["", "<b>Rencana masuk</b>", f"🟩 Ideal beli di {zone}"]
+
+        if result.rr_at_entry is not None:
+            lines.append(
+                f"   Risk/reward di zona ini: <b>1:{result.rr_at_entry:g}</b>"
+            )
+        if result.breakout_trigger is not None:
+            lines.append(
+                f"🚀 Atau tambah saat breakout di atas "
+                f"<b>{format_price(result.breakout_trigger, cur)}</b>"
+            )
+        if result.entry_note:
+            icon = "⚠️" if result.entry_extended else "ℹ️"
+            lines.append(f"{icon} <i>{result.entry_note}</i>")
+    elif result.entry_note:
+        # Bearish or index: say why there is no buy zone instead of omitting it,
+        # so a missing section never reads as an oversight.
+        lines += ["", f"<i>{result.entry_note}</i>"]
+
     if result.pattern_target is not None and result.pattern_breakout is not None:
         lines += [
             "",
