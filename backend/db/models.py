@@ -126,3 +126,75 @@ class AISummaryRow(Base):
     created_at:    Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     news:          Mapped["NewsRow"] = relationship(back_populates="ai_summary")
+
+
+# ── Paper trading (simulated; no real money, no broker) ──────────────────────
+
+
+class PaperAccount(Base):
+    """
+    A simulated trading account, keyed on Telegram chat_id.
+
+    No login by design: the chat itself is the identity, which is the whole
+    point of running this in Telegram. That also means an account is only ever
+    reachable from the chat that owns it.
+    """
+
+    __tablename__ = "paper_account"
+
+    chat_id:    Mapped[str]      = mapped_column(String(32), primary_key=True)
+    cash:       Mapped[float]    = mapped_column(Float, nullable=False)
+    # Realised P&L only; unrealised is computed live from current prices.
+    realised:   Mapped[float]    = mapped_column(Float, default=0.0)
+    fees_paid:  Mapped[float]    = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PaperPosition(Base):
+    """An open holding. `lots`, not shares — IDX trades in lots of 100."""
+
+    __tablename__ = "paper_position"
+    __table_args__ = (Index("ix_paper_pos_chat_ticker", "chat_id", "ticker"),)
+
+    id:        Mapped[int]   = mapped_column(primary_key=True, autoincrement=True)
+    chat_id:   Mapped[str]   = mapped_column(String(32), nullable=False, index=True)
+    ticker:    Mapped[str]   = mapped_column(String(16), nullable=False)
+    lots:      Mapped[int]   = mapped_column(default=0)
+    # Weighted average INCLUDING buy fees, so P&L is honest about entry cost.
+    avg_price: Mapped[float] = mapped_column(Float, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PaperOrder(Base):
+    """
+    A resting or completed simulated order.
+
+    Stop-loss and take-profit are stored as orders rather than as fields on the
+    position so a single holding can carry several exits at once, which is how
+    people actually scale out.
+    """
+
+    __tablename__ = "paper_order"
+    # Composite index for the matcher's "all open orders" sweep. Named distinctly
+    # from the per-column index SQLAlchemy derives for `status` (index=True),
+    # which would otherwise collide on ix_paper_order_status.
+    __table_args__ = (Index("ix_paper_order_status_ticker", "status", "ticker"),)
+
+    id:          Mapped[int]   = mapped_column(primary_key=True, autoincrement=True)
+    chat_id:     Mapped[str]   = mapped_column(String(32), nullable=False, index=True)
+    ticker:      Mapped[str]   = mapped_column(String(16), nullable=False)
+    side:        Mapped[str]   = mapped_column(String(4))    # buy | sell
+    # limit | sl (stop-loss) | tp (take-profit) | trail
+    kind:        Mapped[str]   = mapped_column(String(8), default="limit")
+    limit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lots:        Mapped[int]   = mapped_column(default=0)
+    # open | filled | cancelled | rejected
+    status:      Mapped[str]   = mapped_column(String(12), default="open", index=True)
+    reason:      Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Trailing stops: distance in %, and the best price seen since placement.
+    trail_pct:   Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    peak_price:  Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fill_price:  Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at:  Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    filled_at:   Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

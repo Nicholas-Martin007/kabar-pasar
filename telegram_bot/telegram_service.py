@@ -74,6 +74,15 @@ HELP = (
     "/ihsg — prospek harian IHSG + chart\n"
     "/chart BBCA — chart teknikal harian + level TP/SL\n"
     "/chart IHSG · /chart EMAS · /chart USDIDR — indeks &amp; komoditas\n\n"
+    "<b>Indeks global (MSCI &amp; FTSE)</b>\n"
+    "/msci — berita rebalancing + jadwal review berikutnya\n"
+    "<i>Pengingat otomatis H-3 dan hari-H setiap review.</i>\n\n"
+    "<b>Akun demo — latihan trading (simulasi)</b>\n"
+    "/demo — cara pakai + daftar perintah\n"
+    "/buy TPIA 2000 50 · /sell TPIA 2400 50\n"
+    "/sl TPIA 1800 · /tp TPIA 2400 · /trail TPIA 5\n"
+    "/port — portofolio · /orders · /cancel 3 · /resetdemo\n"
+    "<i>Uang virtual. Tidak terhubung ke sekuritas mana pun.</i>\n\n"
     "<b>Lainnya</b>\n"
     "/news 15 — tampilkan N berita terbaru (default 10)\n"
     "/digest — ringkasan berita hari ini\n"
@@ -194,6 +203,19 @@ async def send_chart(chat_id: str, ticker: str) -> bool:
         logger.warning("telegram.chart_failed ticker=%s error=%s", ticker, exc)
         await send_message(chat_id, "⚠️ Gagal membuat chart. Coba lagi sebentar lagi.")
         return False
+
+    # Chart → practice trade in one step. Only for IDX equities: the demo
+    # account can't hold an index or a commodity.
+    short = ticker.replace(".JK", "")
+    if ticker.endswith(".JK"):
+        rationale += (
+            f"\n\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎮 <b>Coba di akun demo</b> (simulasi, uang virtual)\n"
+            f"<code>/buy {short} [harga] [lot]</code> · "
+            f"<code>/sl {short} [harga]</code> · "
+            f"<code>/tp {short} [harga]</code>\n"
+            f"<code>/port</code> untuk lihat posisi · <code>/demo</code> untuk bantuan"
+        )
 
     ok = await send_photo(chat_id, result.chart_path, caption=rationale)
     if not ok:
@@ -590,6 +612,14 @@ async def _handle_command(chat_id: str, text: str) -> None:
     parts = text.strip().split()
     cmd = parts[0].lower().lstrip("/").split("@")[0]
     arg = parts[1].upper() if len(parts) > 1 else ""
+    # Trade commands take several positional arguments ("/buy TPIA 2000 50"),
+    # unlike the single-arg commands below.
+    args = parts[1:]
+
+    # Paper trading opens its own sessions per step, so it runs before the
+    # shared session below.
+    if await handle_trade_command(chat_id, cmd, args):
+        return
 
     # Handled before the DB session opens: rendering takes seconds and there's
     # no reason to hold a session across it.
@@ -891,3 +921,314 @@ async def send_index_digest(chat_id: str, limit: int = 8) -> bool:
 
     await send_message(chat_id, "\n".join(parts))
     return True
+
+
+# ── Paper trading commands (SIMULATED — no broker, no real money) ────────────
+#
+# The whole feature is deliberately walled off from anything that touches a real
+# account: it reads live prices, and writes only to the paper_* tables. There is
+# no code path from these commands to a broker, and there should never be one.
+
+_PAPER_HELP = (
+    "🎮 <b>Akun demo (simulasi)</b>\n\n"
+    "<code>/buy TPIA 2000 50</code> — beli 50 lot di harga 2.000\n"
+    "<code>/sell TPIA 2400 50</code> — jual 50 lot di harga 2.400\n"
+    "<code>/sl TPIA 1800</code> — pasang stop loss\n"
+    "<code>/tp TPIA 2400</code> — pasang take profit\n"
+    "<code>/trail TPIA 5</code> — trailing stop 5%\n"
+    "<code>/port</code> — portofolio &amp; P&amp;L\n"
+    "<code>/orders</code> — order yang masih antre\n"
+    "<code>/cancel 3</code> — batalkan order #3\n"
+    "<code>/resetdemo</code> — kembalikan saldo awal\n\n"
+    "Order dieksekusi pakai harga pasar sungguhan, biaya beli/jual, "
+    "fraksi harga, dan batas ARA/ARB IDX.\n\n"
+    "<i>Semua simulasi. Tidak ada uang sungguhan dan tidak terhubung ke "
+    "sekuritas mana pun.</i>"
+)
+
+
+async def _quote_for(ticker: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    (last, prev_close) for order validation.
+
+    Returns (None, None) on failure rather than raising: a quote outage should
+    downgrade validation, not block the user from placing an order.
+    """
+    from backend.services.market_service import fetch_quote
+
+    try:
+        q = await fetch_quote(ticker)
+        return q.get("price"), q.get("previousClose")
+    except Exception as exc:
+        logger.debug("paper.quote_failed ticker=%s error=%s", ticker, exc)
+        return None, None
+
+
+async def _live_prices(tickers: List[str]) -> Dict[str, float]:
+    """
+    Best-effort last price per ticker, keyed exactly as passed in.
+
+    Keys must match the stored position ticker (".JK" included) because
+    portfolio() looks prices up by that key; stripping the suffix here would
+    silently mark every position at cost.
+    """
+    out: Dict[str, float] = {}
+    for t in sorted(set(tickers)):
+        last, _ = await _quote_for(t)
+        if last:
+            out[t] = float(last)
+    return out
+
+
+def _format_portfolio(snap: Dict) -> str:
+    from backend.services.idx_rules import describe_costs
+
+    lines = ["💼 <b>Portofolio Demo</b>", ""]
+    if snap["positions"]:
+        for r in snap["positions"]:
+            mark = "🟩" if r["pnl"] >= 0 else "🟥"
+            last = f"{r['last']:,.0f}" if r.get("last") else "—"
+            lines.append(
+                f"{mark} <b>{r['ticker']}</b> · {r['lots']} lot\n"
+                f"   avg <b>{r['avg_price']:,.0f}</b> · now {last} · BEP {r['breakeven']:,.0f}\n"
+                f"   P&amp;L Rp{r['pnl']:,.0f} ({r['pnl_pct']:+.2f}%)"
+            )
+    else:
+        lines.append("<i>Belum ada posisi. Coba <code>/buy TPIA 2000 10</code></i>")
+
+    lines += [
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"Kas               : <b>Rp{snap['cash']:,.0f}</b>",
+        f"Nilai saham       : <b>Rp{snap['market_value']:,.0f}</b>",
+        f"Total ekuitas     : <b>Rp{snap['equity']:,.0f}</b>",
+        f"P&amp;L belum realisasi: Rp{snap['unrealised']:,.0f}",
+        f"P&amp;L terealisasi   : Rp{snap['realised']:,.0f}",
+        f"Total biaya       : Rp{snap['fees_paid']:,.0f}",
+        f"<b>Return: {snap['total_return_pct']:+.2f}%</b> "
+        f"(modal awal Rp{snap['starting']:,.0f})",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"<i>{html.escape(describe_costs())}</i>",
+        "<i>Simulasi — bukan uang sungguhan, tidak terhubung ke sekuritas.</i>",
+    ]
+    return "\n".join(lines)
+
+
+def _parse_price(raw: str) -> float:
+    """Accept 2000, 2.000 and 2,000 — Indonesian users type all three."""
+    return float(raw.replace(".", "").replace(",", ""))
+
+
+async def handle_trade_command(chat_id: str, cmd: str, args: List[str]) -> bool:
+    """
+    Paper-trading commands. Returns True if `cmd` belonged to this handler.
+
+    Kept as one entry point so parsing, validation and the "this is simulated"
+    framing stay identical across every trade command.
+    """
+    from backend.services.paper_broker import (
+        cancel_order,
+        list_open_orders,
+        place_order,
+        portfolio,
+        position_lots,
+        reset_account,
+    )
+    from ta_engine.price_utils import resolve_symbol
+
+    if cmd in ("buy", "sell"):
+        if len(args) < 2:
+            await send_message(
+                chat_id,
+                f"Format: <code>/{cmd} TPIA 2000 50</code> — kode, harga, lot.\n\n"
+                + _PAPER_HELP,
+            )
+            return True
+        try:
+            ticker = resolve_symbol(args[0])
+            price = _parse_price(args[1])
+            lots = int(args[2]) if len(args) > 2 else 1
+        except ValueError:
+            await send_message(
+                chat_id,
+                "⚠️ Harga atau lot tidak valid. Contoh: <code>/buy TPIA 2000 50</code>",
+            )
+            return True
+        last, prev = await _quote_for(ticker)
+        async with get_session() as session:
+            res = await place_order(
+                session, chat_id, ticker, cmd, lots,
+                price=price, last_price=last, prev_close=prev,
+            )
+        await send_message(chat_id, res.message)
+        return True
+
+    if cmd in ("sl", "tp"):
+        if len(args) < 2:
+            label = "stop loss" if cmd == "sl" else "take profit"
+            await send_message(
+                chat_id, f"Format: <code>/{cmd} TPIA 1800</code> — pasang {label}."
+            )
+            return True
+        try:
+            ticker = resolve_symbol(args[0])
+            price = _parse_price(args[1])
+            explicit_lots = int(args[2]) if len(args) > 2 else None
+        except ValueError:
+            await send_message(chat_id, "⚠️ Harga tidak valid.")
+            return True
+        last, prev = await _quote_for(ticker)
+        async with get_session() as session:
+            # Exits cover the whole holding unless a lot count is given, so
+            # scaling out stays possible without making the common case verbose.
+            held = await position_lots(session, chat_id, ticker)
+            if held <= 0:
+                await send_message(
+                    chat_id,
+                    f"⚠️ Tidak ada posisi <b>{html.escape(args[0].upper())}</b> "
+                    f"untuk dipasangi {'stop loss' if cmd == 'sl' else 'take profit'}.",
+                )
+                return True
+            res = await place_order(
+                session, chat_id, ticker, "sell", explicit_lots or held,
+                price=price, kind=cmd, last_price=last, prev_close=prev,
+            )
+        await send_message(chat_id, res.message)
+        return True
+
+    if cmd == "trail":
+        if len(args) < 2:
+            await send_message(
+                chat_id, "Format: <code>/trail TPIA 5</code> — trailing stop 5%."
+            )
+            return True
+        try:
+            ticker = resolve_symbol(args[0])
+            pct = float(args[1].replace(",", "."))
+        except ValueError:
+            await send_message(chat_id, "⚠️ Persentase tidak valid.")
+            return True
+        last, prev = await _quote_for(ticker)
+        async with get_session() as session:
+            held = await position_lots(session, chat_id, ticker)
+            if held <= 0:
+                await send_message(
+                    chat_id,
+                    f"⚠️ Tidak ada posisi <b>{html.escape(args[0].upper())}</b>.",
+                )
+                return True
+            res = await place_order(
+                session, chat_id, ticker, "sell", held, kind="trail",
+                trail_pct=pct, last_price=last, prev_close=prev,
+            )
+        await send_message(chat_id, res.message)
+        return True
+
+    if cmd in ("port", "porto", "portfolio", "posisi"):
+        async with get_session() as session:
+            snap = await portfolio(session, chat_id, {})
+        prices = await _live_prices([f"{r['ticker']}.JK" for r in snap["positions"]])
+        async with get_session() as session:
+            snap = await portfolio(session, chat_id, prices)
+        await send_message(chat_id, _format_portfolio(snap))
+        return True
+
+    if cmd == "orders":
+        async with get_session() as session:
+            rows = await list_open_orders(session, chat_id)
+        if not rows:
+            await send_message(
+                chat_id, "Tidak ada order yang antre. Lihat <code>/demo</code>."
+            )
+            return True
+        lines = ["📋 <b>Order terbuka</b>", ""]
+        for o in rows:
+            px = (
+                f"@ {o['limit_price']:,.0f}"
+                if o.get("limit_price")
+                else f"trailing {o['trail_pct']:g}%"
+            )
+            lines.append(
+                f"<code>#{o['id']}</code> · {o['side'].upper()} <b>{o['ticker']}</b> "
+                f"{o['lots']} lot {px} <i>({o['kind']})</i>"
+            )
+        lines += ["", "<i>Batalkan dengan <code>/cancel [id]</code></i>"]
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if cmd == "cancel":
+        if not args:
+            await send_message(chat_id, "Format: <code>/cancel 3</code>")
+            return True
+        try:
+            order_id = int(args[0].lstrip("#"))
+        except ValueError:
+            await send_message(chat_id, "⚠️ ID order tidak valid.")
+            return True
+        async with get_session() as session:
+            ok = await cancel_order(session, chat_id, order_id)
+        await send_message(
+            chat_id,
+            f"✅ Order #{order_id} dibatalkan."
+            if ok
+            else f"⚠️ Order #{order_id} tidak ditemukan atau sudah selesai.",
+        )
+        return True
+
+    if cmd in ("resetdemo", "resetakun"):
+        from backend.services.idx_rules import STARTING_CASH
+
+        async with get_session() as session:
+            await reset_account(session, chat_id)
+        await send_message(
+            chat_id,
+            f"♻️ Akun demo direset. Semua posisi &amp; order dihapus, "
+            f"saldo kembali <b>Rp{STARTING_CASH:,.0f}</b>.",
+        )
+        return True
+
+    if cmd in ("demo", "trade", "simulasi"):
+        await send_message(chat_id, _PAPER_HELP)
+        return True
+
+    return False
+
+
+async def dispatch_paper_fills() -> int:
+    """
+    Match resting paper orders against live prices and notify on each fill.
+
+    Called by the scheduler, not by a price stream: there is no continuous
+    equity price feed in this app, so the matcher quotes only the tickers that
+    actually have resting orders. Skipped entirely outside JATS hours — a
+    stop-loss must not trigger on an after-hours print.
+
+    Returns the number of fill notifications sent.
+    """
+    from backend.services.idx_rules import market_phase
+    from backend.services.paper_broker import match_open_orders, open_order_tickers
+
+    if market_phase() != "open":
+        return 0
+
+    async with get_session() as session:
+        tickers = await open_order_tickers(session)
+    if not tickers:
+        return 0
+
+    prices = await _live_prices(tickers)
+    if not prices:
+        logger.debug("paper.match_skipped reason=no_prices tickers=%d", len(tickers))
+        return 0
+
+    async with get_session() as session:
+        fills = await match_open_orders(session, prices)
+
+    sent = 0
+    for chat_id, message in fills:
+        if await send_message(chat_id, f"⚡ <b>Order tereksekusi</b>\n\n{message}"):
+            sent += 1
+    if fills:
+        logger.info("paper.fills matched=%d notified=%d", len(fills), sent)
+    return sent

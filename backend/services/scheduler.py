@@ -21,6 +21,7 @@ from telegram_bot.telegram_service import (
     dispatch_alerts,
     dispatch_digest,
     dispatch_index_reminders,
+    dispatch_paper_fills,
     send_test_news,
 )
 
@@ -35,6 +36,10 @@ _HOURLY_DIGEST_COUNT = int(os.getenv("HOURLY_DIGEST_COUNT", "10"))
 # Hour (WIB) for the daily MSCI/FTSE index-review check. Morning, so a T-3
 # heads-up lands before the session rather than after it.
 _INDEX_REMINDER_HOUR_WIB = int(os.getenv("INDEX_REMINDER_HOUR_WIB", "8"))
+# How often to match resting paper-trading orders against live prices, in
+# minutes (0 = off). Quotes are only pulled for tickers that actually have an
+# open order, and the job no-ops outside JATS hours, so this is cheap.
+_PAPER_MATCH_MIN = int(os.getenv("PAPER_MATCH_INTERVAL_MIN", "2"))
 # Testing only: send a Telegram ping every N seconds (0 = off). Never use in prod.
 _TEST_ALERT_SECONDS = int(os.getenv("TEST_ALERT_SECONDS", "0"))
 
@@ -116,6 +121,14 @@ async def index_reminder_job() -> None:
         logger.warning("scheduler.index_reminder_failed error=%s", exc)
 
 
+async def paper_match_job() -> None:
+    """Fill resting paper orders (limit / SL / TP / trailing) and notify."""
+    try:
+        await dispatch_paper_fills()
+    except Exception as exc:
+        logger.warning("scheduler.paper_match_failed error=%s", exc)
+
+
 async def test_ping_job() -> None:
     try:
         await send_test_news()
@@ -176,6 +189,18 @@ def start_scheduler() -> AsyncIOScheduler:
         coalesce=True,
         replace_existing=True,
     )
+
+    # Paper-trading order matcher. Self-skips when the market is closed.
+    if _PAPER_MATCH_MIN > 0:
+        _scheduler.add_job(
+            paper_match_job,
+            trigger=IntervalTrigger(minutes=_PAPER_MATCH_MIN),
+            id="paper_match",
+            name="Match paper trading orders",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
 
     # Testing only: rapid Telegram ping to evaluate delivery.
     if _TEST_ALERT_SECONDS > 0:
