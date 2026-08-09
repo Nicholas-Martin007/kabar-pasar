@@ -91,9 +91,52 @@ async def get_chart(ticker: str, force: bool = False) -> ChartResult:
         return result
 
 
+async def attach_news_context(result: ChartResult, ticker: str) -> ChartResult:
+    """
+    Explain the chart's volume spikes with news about the same ticker.
+
+    Reads from the local news cache rather than re-fetching: the ingestion
+    pipeline already holds everything, and a chart request shouldn't fan out to
+    twelve RSS feeds.
+
+    Failures are swallowed — the volume/news linkage is an enrichment, and a
+    chart without it is still a correct chart.
+    """
+    from backend.db.repository import query_news
+    from backend.db.session import get_session
+    from ta_engine.news_context import attach_news, summarise
+
+    if not result.volume_events:
+        return result
+
+    base = ticker.strip().upper().split(".")[0].lstrip("^")
+    try:
+        async with get_session() as session:
+            items = await query_news(session, ticker=base, limit=400)
+    except Exception as exc:
+        logger.warning("chart.news_context_failed ticker=%s error=%s", ticker, exc)
+        return result
+
+    from ta_engine.news_context import VolumeEvent
+
+    events = [VolumeEvent(**{k: v for k, v in e.items() if k != "explained"})
+              for e in result.volume_events]
+    news = [n.model_dump() for n in items]
+    events = attach_news(events, news, ticker)
+
+    result.volume_events = [e.to_dict() for e in events]
+    result.volume_summary = summarise(events, result.currency)
+    logger.info(
+        "chart.news_context ticker=%s spikes=%d explained=%d",
+        ticker, len(events), sum(1 for e in events if e.explained),
+    )
+    return result
+
+
 async def get_chart_with_rationale(
     ticker: str, force: bool = False
 ) -> Tuple[ChartResult, str]:
     """Chart plus its plain-language technical summary (HTML, Telegram-ready)."""
     result = await get_chart(ticker, force=force)
+    result = await attach_news_context(result, ticker)
     return result, build_rationale(result)

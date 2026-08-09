@@ -82,15 +82,68 @@ def build_rationale(result: "ChartResult") -> str:
     else:
         lines.append("🔴 Resistance: <i>tidak terdeteksi di atas harga</i>")
 
-    lines += [
-        "",
-        "<b>Skenario (asumsi posisi BELI)</b>",
-        f"🎯 TP1: <b>{format_price(result.tp1, cur)}</b>  (1:{result.risk_reward_tp1:g})",
-        f"🎯 TP2: <b>{format_price(result.tp2, cur)}</b>  (1:{result.risk_reward_tp2:g})",
-        f"🛑 SL: <b>{format_price(result.sl, cur)}</b>",
-        f"Risiko per lembar: {format_price(result.risk_per_share, cur)} {cur} "
-        f"({result.risk_per_share / result.last_close:.1%} dari harga)",
-    ]
+    # The scenario heading must match the frame. Labelling a breakdown "asumsi
+    # posisi BELI" would tell the reader to buy the exact setup the chart is
+    # warning about.
+    if result.trade_direction == "none":
+        lines += [
+            "",
+            "<i>Indeks tidak bisa dibeli langsung oleh investor ritel, jadi "
+            "tidak ada level TP/SL — support &amp; resistance di atas berlaku "
+            "sebagai acuan arah pasar.</i>",
+        ]
+    elif result.tp1 is not None:
+        short = result.trade_direction == "short"
+        head = (
+            "<b>Skenario BEARISH (jika breakdown)</b>" if short
+            else "<b>Skenario (asumsi posisi BELI)</b>"
+        )
+        lines += [
+            "",
+            head,
+            f"🎯 Target 1: <b>{format_price(result.tp1, cur)}</b>  (1:{result.risk_reward_tp1:g})",
+            f"🎯 Target 2: <b>{format_price(result.tp2, cur)}</b>  (1:{result.risk_reward_tp2:g})",
+            f"🛑 Invalidasi: <b>{format_price(result.sl, cur)}</b>",
+            f"Jarak risiko: {format_price(result.risk_per_share, cur)} {cur} "
+            f"({result.risk_per_share / result.last_close:.1%} dari harga)",
+        ]
+        if short:
+            lines.append(
+                "<i>Ritel IDX umumnya tidak bisa short — ini acuan risiko "
+                "turun &amp; batas invalidasi, bukan ajakan jual.</i>"
+            )
+
+    if result.pattern_target is not None and result.pattern_breakout is not None:
+        lines += [
+            "",
+            f"📐 Measured move pola: tembus <b>{format_price(result.pattern_breakout, cur)}</b> "
+            f"→ proyeksi <b>{format_price(result.pattern_target, cur)}</b>",
+        ]
+
+    # Volume + news: the "why" behind the chart. Worded as coincidence, never
+    # causation — a same-day headline is temporal overlap, not proof.
+    events = [e for e in (result.volume_events or [])][:3]
+    if events:
+        lines += ["", "<b>Aktivitas volume &amp; berita</b>"]
+        for ev in events:
+            move = (
+                f", harga {ev['change_percent']:+.2f}%"
+                if ev.get("change_percent") is not None
+                else ""
+            )
+            lines.append(
+                f"📊 <b>{ev['date']}</b> — volume {ev['multiple']:.1f}x rata-rata{move}"
+            )
+            heads = ev.get("headlines") or []
+            if heads:
+                for h in heads[:2]:
+                    src = f" <i>({h['source']})</i>" if h.get("source") else ""
+                    lines.append(f"   ↳ bertepatan dengan: {h['title']}{src}")
+            else:
+                lines.append("   ↳ <i>tidak ada berita emiten terdeteksi hari itu</i>")
+        lines.append(
+            "<i>Berita di tanggal yang sama = kebetulan waktu, belum tentu penyebab.</i>"
+        )
 
     if result.warnings:
         lines += ["", "⚠️ <b>Catatan penting</b>"]

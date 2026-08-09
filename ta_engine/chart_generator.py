@@ -52,10 +52,12 @@ from .indicators import (  # noqa: E402
     nearest_levels,
 )
 from .pattern_detector import MIN_QUALITY, Pattern, detect_patterns  # noqa: E402
+from .news_context import find_volume_spikes  # noqa: E402
 from .price_utils import (  # noqa: E402
     format_price,
     idx_tick_size,
     is_idx_symbol,
+    is_index_symbol,
     round_level,
     round_to_idx_tick,
 )
@@ -136,9 +138,10 @@ class ChartResult:
     last_close: float
     support: Optional[float]
     resistance: Optional[float]
-    tp1: float
-    tp2: float
-    sl: float
+    # None for an index — see `trade_direction`.
+    tp1: Optional[float]
+    tp2: Optional[float]
+    sl: Optional[float]
     rsi: float
     atr: float
     ema20: float
@@ -166,6 +169,21 @@ class ChartResult:
     # Shape conformance of the winning pattern, 0.0 when none qualified. This is
     # geometry, not a probability of the setup working.
     quality_score: float = 0.0
+    # "long" | "short" | "none". Which way the TP/SL frame reads — it follows
+    # the detected pattern so the numbers can't contradict the badge. "none" is
+    # an index, where there is no retail instrument to place a level on.
+    trade_direction: str = "long"
+    # Pattern's own measured move, when one was detected. Derived from the
+    # structure rather than from ATR, so it is the pattern's actual thesis.
+    pattern_target: Optional[float] = None
+    pattern_breakout: Optional[float] = None
+
+    # ── Volume / news linkage ────────────────────────────────────────────
+    # Unusual-volume bars, newest first. `headlines` is filled in later by
+    # chart_service.attach_news_context, which has DB access; the engine
+    # itself stays offline-testable.
+    volume_events: List[Dict[str, Any]] = field(default_factory=list)
+    volume_summary: Optional[str] = None
 
     disclaimer: str = DISCLAIMER
 
@@ -207,6 +225,7 @@ def _compute_trade_levels(
     support: Optional[Level],
     resistance: Optional[Level],
     ticker: Optional[str] = None,
+    direction: str = "long",
 ) -> Dict[str, Any]:
     """
     Stop below structure, targets at fixed R multiples.
@@ -219,19 +238,35 @@ def _compute_trade_levels(
     construction regardless of which stop was used.
     """
     warnings: List[str] = []
+    short = direction == "short"
 
-    atr_stop = entry - _ATR_STOP_MULT * atr
-    if support is not None and support.price < entry:
-        structure_stop = support.price - _SUPPORT_BUFFER_ATR * atr
-        # Take the lower (safer) of the two so a tight ATR stop can't sit inside
-        # a support zone where noise would stop us out.
-        sl = min(atr_stop, structure_stop)
+    if short:
+        # Mirror image: a breakdown thesis is invalidated by price reclaiming
+        # RESISTANCE, so the stop sits above it and targets project downward.
+        atr_stop = entry + _ATR_STOP_MULT * atr
+        if resistance is not None and resistance.price > entry:
+            structure_stop = resistance.price + _SUPPORT_BUFFER_ATR * atr
+            # Higher of the two, so a tight ATR stop can't sit inside supply.
+            sl = max(atr_stop, structure_stop)
+        else:
+            sl = atr_stop
+            warnings.append(
+                "No confirmed resistance above price — stop is ATR-derived only, "
+                "with no structural level backing it."
+            )
     else:
-        sl = atr_stop
-        warnings.append(
-            "No confirmed support below price — stop is ATR-derived only, "
-            "with no structural level backing it."
-        )
+        atr_stop = entry - _ATR_STOP_MULT * atr
+        if support is not None and support.price < entry:
+            structure_stop = support.price - _SUPPORT_BUFFER_ATR * atr
+            # Take the lower (safer) of the two so a tight ATR stop can't sit inside
+            # a support zone where noise would stop us out.
+            sl = min(atr_stop, structure_stop)
+        else:
+            sl = atr_stop
+            warnings.append(
+                "No confirmed support below price — stop is ATR-derived only, "
+                "with no structural level backing it."
+            )
 
     # Snap the stop onto the IDX grid BEFORE deriving anything from it, then
     # recompute risk from the rounded value. Rounding the stop afterwards would
@@ -239,33 +274,55 @@ def _compute_trade_levels(
     # real risk denominator while the targets stay where they were. Floor, not
     # nearest, so the snap can only widen the stop — never tighten it into the
     # noise it was sized to survive.
+    # Round the stop AWAY from entry in whichever direction widens it, then
+    # derive risk from the rounded value.
     if is_idx_symbol(ticker):
-        sl = float(round_to_idx_tick(sl, "floor"))
+        sl = float(round_to_idx_tick(sl, "ceil" if short else "floor"))
 
-    risk = entry - sl
+    risk = (sl - entry) if short else (entry - sl)
     if risk <= 0 or not math.isfinite(risk):
         raise ValueError(
             f"computed non-positive risk (entry={entry}, sl={sl}); ATR may be zero"
         )
 
-    tp1 = entry + _TP1_R * risk
-    tp2 = entry + _TP2_R * risk
+    if short:
+        tp1 = entry - _TP1_R * risk
+        tp2 = entry - _TP2_R * risk
+    else:
+        tp1 = entry + _TP1_R * risk
+        tp2 = entry + _TP2_R * risk
 
-    # Ceil for targets, so rounding never shaves reward below the R multiple.
+    # Round targets away from entry too, so rounding never shaves reward below
+    # the R multiple.
     if is_idx_symbol(ticker):
-        tp1 = float(round_to_idx_tick(tp1, "ceil"))
-        tp2 = float(round_to_idx_tick(tp2, "ceil"))
+        tp_dir = "floor" if short else "ceil"
+        tp1 = float(round_to_idx_tick(tp1, tp_dir))
+        tp2 = float(round_to_idx_tick(tp2, tp_dir))
 
     risk_fraction = risk / entry
     if risk_fraction > _MAX_RISK_FRACTION:
         warnings.append(
-            f"Stop is {risk_fraction:.1%} below entry — unusually wide; "
-            f"position sizing matters more than the levels here."
+            f"Stop is {risk_fraction:.1%} {'above' if short else 'below'} entry — "
+            f"unusually wide; position sizing matters more than the levels here."
         )
 
-    # A target you can only reach by punching through known supply is not a
+    # A target you can only reach by punching through known structure is not a
     # 2R target in practice. Say so rather than quietly returning it.
-    if resistance is not None and resistance.price < tp1:
+    if short:
+        if support is not None and support.price > tp1:
+            warnings.append(
+                f"Support at {support.price:,.2f} sits above TP1 ({tp1:,.2f}) — "
+                f"the 1:2 target requires breaking that level first."
+            )
+        # IDX retail has no practical way to short a single stock, so a
+        # breakdown frame is risk management (trim / stand aside), not a trade
+        # to place. Saying so prevents it being read as a sell-short signal.
+        warnings.append(
+            "Bearish setup: IDX retail generally cannot short single stocks, so "
+            "these levels describe downside risk and invalidation — not a "
+            "short position to open."
+        )
+    elif resistance is not None and resistance.price < tp1:
         warnings.append(
             f"Resistance at {resistance.price:,.2f} sits below TP1 "
             f"({tp1:,.2f}) — the 1:2 target requires breaking that level first."
@@ -276,6 +333,7 @@ def _compute_trade_levels(
         "tp1": tp1,
         "tp2": tp2,
         "risk": risk,
+        "direction": direction,
         "warnings": warnings,
     }
 
@@ -319,6 +377,7 @@ def _render_chart(
     patterns: Optional[List[Pattern]] = None,
     timeframe: str = "1d",
     sentiment: str = "NEUTRAL",
+    volume_events: Optional[List[Any]] = None,
 ) -> None:
     """Candlestick + EMA overlays + green (support/TP) and red (resistance/SL) lines."""
     plot_df = df.tail(plot_bars)
@@ -329,8 +388,10 @@ def _render_chart(
         mpf.make_addplot(plot_df["ema50"], color="#F5A623", width=1.1),
     ]
 
-    green = [levels["tp1"], levels["tp2"]]
-    red = [levels["sl"]]
+    # An index has no tradeable TP/SL, so only structural levels are drawn.
+    show_trade = not is_index_symbol(ticker)
+    green = [levels["tp1"], levels["tp2"]] if show_trade else []
+    red = [levels["sl"]] if show_trade else []
     if support is not None:
         green.append(support.price)
     if resistance is not None:
@@ -405,16 +466,21 @@ def _render_chart(
             # Matplotlib then clips it at the axis and it reads as a rendering
             # glitch (a line entering from nowhere). Give it headroom, but cap
             # the expansion so the candles never get squashed to fit a trendline.
-            if segments:
-                pts = [p for seg in segments for _ts, p in seg]
+            # Include the horizontal trade levels, not just pattern geometry: in
+            # a breakdown frame the stop sits ABOVE price and can land outside
+            # the candle range, which clipped its label against the top edge.
+            pts = [p for seg in segments for _ts, p in seg]
+            pts += [v for v in (green + red) if v is not None]
+            if pts:
                 y_lo, y_hi = ax.get_ylim()
                 span = y_hi - y_lo
                 want_lo = min(y_lo, min(pts))
                 want_hi = max(y_hi, max(pts))
-                limit = span * 0.20
+                # Headroom above is larger: labels are drawn upward from their
+                # level, so the topmost one needs a line's worth of clearance.
                 ax.set_ylim(
-                    max(want_lo, y_lo - limit),
-                    min(want_hi, y_hi + limit),
+                    max(want_lo, y_lo - span * 0.20),
+                    min(want_hi + span * 0.04, y_hi + span * 0.28),
                 )
 
             # IDX prices show as clean integers — sub-rupiah decimals aren't
@@ -422,11 +488,19 @@ def _render_chart(
             cur = "IDR" if is_idx_symbol(ticker) else "USD"
             fmt = lambda v: format_price(v, cur)  # noqa: E731
 
-            annotations = [
-                (levels["tp2"], f"TP2 {fmt(levels['tp2'])}", "#22C55E"),
-                (levels["tp1"], f"TP1 {fmt(levels['tp1'])}", "#22C55E"),
-                (levels["sl"], f"SL {fmt(levels['sl'])}", "#F43F5E"),
-            ]
+            annotations = []
+            if show_trade:
+                # Colour by what the level MEANS in this frame: in a
+                # breakdown the targets are below and the stop above, so a
+                # fixed green-up/red-down palette would invert the meaning.
+                short = levels.get("direction") == "short"
+                tp_c = "#F43F5E" if short else "#22C55E"
+                sl_c = "#22C55E" if short else "#F43F5E"
+                annotations = [
+                    (levels["tp2"], f"TP2 {fmt(levels['tp2'])}", tp_c),
+                    (levels["tp1"], f"TP1 {fmt(levels['tp1'])}", tp_c),
+                    (levels["sl"], f"SL {fmt(levels['sl'])}", sl_c),
+                ]
             # Snap S/R for display the same way the payload does. Formatting the
             # raw level instead would print a number like 4,184 that is not a
             # legal Rp10 tick, and would disagree with the 4,180 the API returns
@@ -543,6 +617,31 @@ def _render_chart(
                     ),
                 )
 
+            # Mark unusual-volume bars on the price panel. These are where the
+            # news linkage hangs — the marker says "something happened here",
+            # and the payload/caption says what (or that nothing was found).
+            if volume_events and len(axes) > 2:
+                vol_ax = axes[2]
+                visible = {d.strftime("%Y-%m-%d"): i
+                           for i, d in enumerate(plot_df.index)}
+                for ev in volume_events:
+                    ev_date = ev.date if hasattr(ev, "date") else ev.get("date")
+                    pos = visible.get(ev_date)
+                    if pos is None:
+                        continue
+                    vol_ax.annotate(
+                        "▲",
+                        xy=(pos, 0),
+                        xycoords=("data", "axes fraction"),
+                        xytext=(0, -1),
+                        textcoords="offset points",
+                        ha="center",
+                        va="top",
+                        fontsize=7,
+                        color="#F5A623",
+                        annotation_clip=False,
+                    )
+
             fig.text(
                 0.01, 0.01, DISCLAIMER,
                 fontsize=6.5, color="#6F80A2", ha="left", va="bottom",
@@ -589,8 +688,15 @@ def _analyse_timeframe(
         raise ValueError(f"ATR is {atr} for {symbol} @{interval} — cannot size a stop")
 
     support, resistance = nearest_levels(entry, build_levels(df, atr))
-    trade = _compute_trade_levels(entry, atr, support, resistance, ticker=symbol)
+    # Patterns first: the trade frame follows the detected structure. Presenting
+    # long targets beneath a "WARNING / BEARISH" badge is a direct
+    # contradiction — the badge says price should fall while the numbers
+    # describe a buy, and a reader can act on either.
     patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
+    frame = "short" if (patterns and patterns[0].direction == "bearish") else "long"
+    trade = _compute_trade_levels(
+        entry, atr, support, resistance, ticker=symbol, direction=frame
+    )
 
     return _TimeframeAnalysis(
         timeframe=interval,
@@ -693,10 +799,16 @@ def generate_chart(
 
     best = patterns[0] if patterns else None
     sentiment = _sentiment_for(best.direction if best else None)
+    is_index = is_index_symbol(symbol)
+    # Volume spikes are found here; the headlines that explain them are
+    # attached downstream where the news cache is reachable.
+    volume_events = find_volume_spikes(df)
+    pattern_levels = (best.key_levels if best else {}) or {}
 
     _render_chart(
         df, symbol, trade, support, resistance, out_path, plot_bars, patterns,
         timeframe=chosen.timeframe, sentiment=sentiment,
+        volume_events=volume_events,
     )
 
     warnings = list(trade["warnings"])
@@ -727,9 +839,12 @@ def generate_chart(
         # — round_level here is a no-op for IDX and preserves floats elsewhere.
         support=round_level(support.price, symbol) if support else None,
         resistance=round_level(resistance.price, symbol) if resistance else None,
-        tp1=round_level(trade["tp1"], symbol),
-        tp2=round_level(trade["tp2"], symbol),
-        sl=round_level(trade["sl"], symbol),
+        # An index has no tradeable instrument behind it — IDX retail cannot buy
+        # ^JKSE — so quoting entry/target/stop on it invents a position that
+        # cannot be taken. Support and resistance still stand as analysis.
+        tp1=None if is_index else round_level(trade["tp1"], symbol),
+        tp2=None if is_index else round_level(trade["tp2"], symbol),
+        sl=None if is_index else round_level(trade["sl"], symbol),
         rsi=round(rsi, 2),
         atr=round(atr, 4),
         ema20=round(float(last["ema20"]), 4),
@@ -755,6 +870,10 @@ def generate_chart(
         pattern_name=best.pattern_type if best else None,
         sentiment=sentiment,
         quality_score=best.quality_score if best else 0.0,
+        trade_direction="none" if is_index else trade.get("direction", "long"),
+        pattern_target=round_level(pattern_levels.get("target"), symbol),
+        pattern_breakout=round_level(pattern_levels.get("breakout_level"), symbol),
+        volume_events=[e.to_dict() for e in volume_events],
     )
 
     logger.info(
