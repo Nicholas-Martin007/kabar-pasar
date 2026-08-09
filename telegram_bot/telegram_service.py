@@ -140,8 +140,15 @@ async def send_photo(
         logger.warning("telegram.photo_missing path=%s", photo_path)
         return False
 
+    # When the text is too long for a caption, the photo carries a SHORT header
+    # only and the analysis follows once as its own message. Previously the
+    # photo carried a truncated copy AND the full text followed, so the reader
+    # saw the same analysis twice — once cut off mid-sentence.
     overflow = len(caption) > _CAPTION_LIMIT
-    short = _trim_html(caption, _CAPTION_LIMIT) if overflow else caption
+    if overflow:
+        short = _caption_header(caption)
+    else:
+        short = caption
 
     url = _API.format(token=_token(), method="sendPhoto")
     data = {"chat_id": chat_id, "parse_mode": "HTML"}
@@ -196,6 +203,26 @@ async def send_chart(chat_id: str, ticker: str) -> bool:
 
 
 _TAG_RE = re.compile(r"<(/?)([a-zA-Z]+)[^>]*>")
+
+
+def _caption_header(text: str) -> str:
+    """
+    First couple of lines of an over-long body, as the photo's caption.
+
+    Just enough to identify the image (ticker + date). The full analysis arrives
+    as the single message that follows, so nothing is duplicated and nothing is
+    cut off mid-sentence.
+    """
+    head: List[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            if head:
+                break
+            continue
+        head.append(line)
+        if len(head) >= 2:
+            break
+    return _trim_html("\n".join(head), _CAPTION_LIMIT)
 
 
 def _trim_html(text: str, limit: int) -> str:

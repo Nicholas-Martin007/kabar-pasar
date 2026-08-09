@@ -242,29 +242,34 @@ def build_entry_plan(
 
     # The band sits just above support: that is where risk is smallest and the
     # invalidation is closest, which is the definition of a good entry.
+    # The zone must sit STRICTLY BELOW the last price. Capping it at the market
+    # (the previous behaviour) meant that whenever price was already near
+    # support the band collapsed onto the close and the app effectively printed
+    # "ideal buy = current price" — which reads as permission to hajar kanan,
+    # chase the offer. An accumulation zone is a level you wait for, not a
+    # licence to pay up; if there is no room below, the honest answer is "wait",
+    # not a buy price that happens to equal the screen.
+    tick = float(idx_tick_size(close)) if idx else max(close * 0.001, 0.01)
+    ceiling = close - tick
+
     if support is not None and support < close:
         low = snap(support, "ceil")
-        # Cap the top of the band at the market. The raw band is
-        # support + 0.75*ATR, which can sit ABOVE the current price when price
-        # is already hugging support — and a zone whose midpoint is above the
-        # market is not an accumulation zone, it is an instruction to pay up.
-        # Left uncapped this produced BMRI "ideal buy 4,220-4,290" with the
-        # stock at 4,240, and an R/R at entry of 1.74 versus the headline 2.0:
-        # the "ideal" entry was measurably worse than just buying.
-        raw_high = min(support + ENTRY_BAND_ATR * atr, close)
+        raw_high = min(support + ENTRY_BAND_ATR * atr, ceiling)
         high = snap(raw_high, "floor")
-        if high <= low:
-            # Support and price are within one tick — the zone collapses to the
-            # market, which is the honest answer rather than an invented spread.
-            high = snap(close, "floor")
-            low = min(low, high)
         distance_atr = (close - support) / atr
         extended = distance_atr > EXTENDED_ATR
+        if high < low:
+            # Price is sitting on support with no room for a band. Quote the
+            # support level itself as the wait-for level rather than the market.
+            low = high = snap(support, "nearest")
     else:
         # No support below price — anchor the band on ATR beneath the close so
-        # there is still a defined level rather than "buy anywhere".
+        # there is still a defined level rather than "buy anywhere". Still
+        # strictly below the market, for the same anti-chasing reason.
         low = snap(close - ENTRY_BAND_ATR * atr, "ceil")
-        high = snap(close, "floor")
+        high = snap(ceiling, "floor")
+        if high < low:
+            low = high
         extended = False
 
     out["entry_low"], out["entry_high"] = low, high
@@ -279,20 +284,27 @@ def build_entry_plan(
     if breakout_level is not None and breakout_level > close:
         out["breakout_trigger"] = snap(breakout_level, "ceil")
 
+    # Every branch here describes WAITING for a level. There is deliberately no
+    # "buy at market" outcome: the whole point of quoting an entry is to give
+    # the user a price to be patient for.
+    gap_pct = (close - high) / close * 100 if close else 0.0
     if extended:
         out["entry_type"] = "pullback"
         out["note"] = (
-            "Harga sudah jauh di atas zona ideal — masuk di sini artinya "
-            "mengejar. Lebih baik tunggu pullback ke zona."
+            f"Harga sudah {(close - (support or high)) / atr:.1f}x ATR di atas support — "
+            f"beli di harga sekarang berarti mengejar. Tunggu pullback ke zona."
         )
-    elif low <= close <= high:
-        out["entry_type"] = "market"
-        out["note"] = "Harga sedang berada di dalam zona beli ideal."
-    elif close < low:
-        out["entry_type"] = "breakout"
-        out["note"] = "Harga di bawah zona — tunggu harga kembali ke zona atau breakout."
+    elif gap_pct <= 1.0:
+        out["entry_type"] = "pullback"
+        out["note"] = (
+            "Harga hanya sedikit di atas zona — sabar menunggu isi di zona "
+            "memberi risiko lebih kecil daripada beli di harga sekarang."
+        )
     else:
         out["entry_type"] = "pullback"
-        out["note"] = "Tunggu pullback ke zona untuk risiko lebih kecil."
+        out["note"] = (
+            f"Tunggu pullback ~{gap_pct:.1f}% ke zona; risiko lebih kecil "
+            f"dibanding beli di harga sekarang."
+        )
 
     return out

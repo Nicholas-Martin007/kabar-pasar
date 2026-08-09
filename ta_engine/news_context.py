@@ -191,9 +191,10 @@ def attach_news(
                     conf = _score_match(ev, item, offset, base)
                     if any(m["title"] == item.get("title") for m in matches):
                         continue
+                    _src = item.get("source")
                     matches.append({
                         "title": item.get("title"),
-                        "source": item.get("source"),
+                        "source": getattr(_src, "value", _src),
                         "url": item.get("url"),
                         "importance": item.get("importance"),
                         "publishedAt": item.get("published_at") or item.get("publishedAt"),
@@ -279,9 +280,12 @@ def recent_for_ticker(
         if not title or title in seen_titles:
             continue
         seen_titles.add(title)
+        # model_dump() hands back the NewsSource enum, not its value, so a
+        # naive str() renders "NewsSource.CNBC_INDONESIA" in the caption.
+        src = item.get("source")
         out.append({
             "title": title,
-            "source": item.get("source"),
+            "source": getattr(src, "value", src),
             "url": item.get("url"),
             "importance": item.get("importance"),
             "publishedAt": when(item),

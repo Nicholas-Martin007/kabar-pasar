@@ -11,12 +11,17 @@ Describes what the indicators SAY. It does not tell anyone to buy or sell; the
 disclaimer travels with it.
 """
 
+import html
 from typing import TYPE_CHECKING, List
 
 from .price_utils import format_price
 
 if TYPE_CHECKING:  # avoid a circular import at runtime
     from .chart_generator import ChartResult
+
+# Section divider. Plain rule rather than emoji so it reads as structure,
+# not decoration, and stays legible in Telegram's narrow column.
+_DIV = "━━━━━━━━━━━━━━━━━━━━"
 
 # Wilder's conventional RSI thresholds.
 _RSI_OVERBOUGHT = 70
@@ -57,6 +62,7 @@ def build_rationale(result: "ChartResult") -> str:
         f"• {_rsi_phrase(result.rsi)}",
         f"• ATR(14) {format_price(result.atr, cur)} — ukuran volatilitas harian",
         "",
+        _DIV,
         "<b>Level kunci</b>",
     ]
 
@@ -100,6 +106,7 @@ def build_rationale(result: "ChartResult") -> str:
         )
         lines += [
             "",
+            _DIV,
             head,
             f"🎯 Target 1: <b>{format_price(result.tp1, cur)}</b>  (1:{result.risk_reward_tp1:g})",
             f"🎯 Target 2: <b>{format_price(result.tp2, cur)}</b>  (1:{result.risk_reward_tp2:g})",
@@ -121,7 +128,7 @@ def build_rationale(result: "ChartResult") -> str:
         lo = format_price(result.entry_low, cur)
         hi = format_price(result.entry_high, cur)
         zone = f"<b>{lo}</b>" if result.entry_low == result.entry_high else f"<b>{lo} – {hi}</b>"
-        lines += ["", "<b>Rencana masuk</b>", f"🟩 Ideal beli di {zone}"]
+        lines += ["", _DIV, "<b>Rencana masuk</b>", f"🟩 Ideal beli di {zone}"]
 
         if result.rr_at_entry is not None:
             lines.append(
@@ -151,7 +158,7 @@ def build_rationale(result: "ChartResult") -> str:
     # that earns money. Metrics that failed validation are simply absent — see
     # ta_engine.fundamentals on why bad vendor data is dropped, not shown.
     if result.fundamentals_summary:
-        lines += ["", "<b>Fundamental</b>", f"🏦 {result.fundamentals_summary}"]
+        lines += ["", _DIV, "<b>Fundamental</b>", f"🏦 {result.fundamentals_summary}"]
         f = result.fundamentals or {}
         if f.get("suppressed"):
             lines.append(
@@ -166,6 +173,7 @@ def build_rationale(result: "ChartResult") -> str:
         icon = "🔴" if d["direction"] == "bearish" else "🟢"
         lines += [
             "",
+            _DIV,
             f"{icon} <b>{d['type']}</b>",
             f"   {d['from']['date']} RSI {d['from']['rsi']:.0f} → "
             f"{d['to']['date']} RSI {d['to']['rsi']:.0f} "
@@ -181,13 +189,18 @@ def build_rationale(result: "ChartResult") -> str:
     news = result.recent_news or []
     if news:
         icon = {"high": "🔴", "medium": "🔵", "low": "⚪"}
-        lines += ["", f"<b>Berita terbaru {result.ticker}</b>"]
+        lines += ["", _DIV, f"<b>Berita terbaru {result.ticker}</b>"]
         for n in news[:5]:
             dot = icon.get(n.get("importance"), "⚪")
             when = str(n.get("publishedAt") or "")[:10]
             flag = "🚨 " if n.get("isMsciAlert") else ""
-            title = n.get("title") or ""
-            lines.append(f"{dot} {flag}<b>{when}</b> {title}")
+            title = html.escape(n.get("title") or "")
+            url = n.get("url")
+            # Link the headline itself: an <a> keeps the message compact where a
+            # bare URL on its own line would double the length of this section.
+            body = f'<a href="{html.escape(str(url))}">{title}</a>' if url else title
+            src = f" <i>· {html.escape(str(n['source']))}</i>" if n.get("source") else ""
+            lines.append(f"{dot} {flag}<b>{when}</b> {body}{src}")
         lines.append("<i>Apa adanya — kabar baik maupun buruk.</i>")
     else:
         lines += [
@@ -200,7 +213,7 @@ def build_rationale(result: "ChartResult") -> str:
     # independent of whether a headline happens to explain it.
     events = [e for e in (result.volume_events or [])][:3]
     if events:
-        lines += ["", "<b>Aktivitas volume &amp; berita</b>"]
+        lines += ["", _DIV, "<b>Aktivitas volume</b>"]
         for ev in events:
             move = (
                 f", harga {ev['change_percent']:+.2f}%"
@@ -222,7 +235,7 @@ def build_rationale(result: "ChartResult") -> str:
         )
 
     if result.warnings:
-        lines += ["", "⚠️ <b>Catatan penting</b>"]
+        lines += ["", _DIV, "⚠️ <b>Catatan penting</b>"]
         lines += [f"• {w}" for w in result.warnings]
 
     lines += ["", f"<i>{result.disclaimer}</i>"]
