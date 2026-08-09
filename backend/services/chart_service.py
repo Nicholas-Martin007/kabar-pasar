@@ -104,10 +104,7 @@ async def attach_news_context(result: ChartResult, ticker: str) -> ChartResult:
     """
     from backend.db.repository import query_news
     from backend.db.session import get_session
-    from ta_engine.news_context import attach_news, summarise
-
-    if not result.volume_events:
-        return result
+    from ta_engine.news_context import attach_news, recent_for_ticker, summarise
 
     base = ticker.strip().upper().split(".")[0].lstrip("^")
     try:
@@ -117,18 +114,28 @@ async def attach_news_context(result: ChartResult, ticker: str) -> ChartResult:
         logger.warning("chart.news_context_failed ticker=%s error=%s", ticker, exc)
         return result
 
-    from ta_engine.news_context import VolumeEvent
-
-    events = [VolumeEvent(**{k: v for k, v in e.items() if k != "explained"})
-              for e in result.volume_events]
     news = [n.model_dump() for n in items]
-    events = attach_news(events, news, ticker)
 
-    result.volume_events = [e.to_dict() for e in events]
-    result.volume_summary = summarise(events, result.currency)
+    # Recent headlines are shown UNCONDITIONALLY, not only when they happen to
+    # land on a volume spike. Gating on spikes meant most charts carried no news
+    # at all, which is the opposite of useful: the reason to read news beside a
+    # chart is conviction, and that applies on quiet days too.
+    result.recent_news = recent_for_ticker(news, limit=5)
+
+    # Volume spikes stay as their own, separate section — still worth knowing
+    # where the unusual activity was, independent of whether news explains it.
+    if result.volume_events:
+        from ta_engine.news_context import VolumeEvent
+
+        events = [VolumeEvent(**{k: v for k, v in e.items() if k != "explained"})
+                  for e in result.volume_events]
+        events = attach_news(events, news, ticker)
+        result.volume_events = [e.to_dict() for e in events]
+        result.volume_summary = summarise(events, result.currency)
+
     logger.info(
-        "chart.news_context ticker=%s spikes=%d explained=%d",
-        ticker, len(events), sum(1 for e in events if e.explained),
+        "chart.news_context ticker=%s recent=%d spikes=%d",
+        ticker, len(result.recent_news), len(result.volume_events),
     )
     return result
 

@@ -42,6 +42,12 @@ _MSCI_PATTERNS: Sequence[re.Pattern] = (
     re.compile(r"\bMSCI\b", re.IGNORECASE),
     re.compile(r"\bmorgan\s+stanley\s+capital\s+international\b", re.IGNORECASE),
     re.compile(r"\bkocok\s+ulang\b", re.IGNORECASE),
+    # FTSE Russell runs the same kind of mechanical rebalance and pushes the
+    # same passive money through IDX names, so it earns the same priority.
+    # Anchored for the same reason MSCI is: it must not match inside a longer
+    # token.
+    re.compile(r"\bFTSE\b", re.IGNORECASE),
+    re.compile(r"\bftse\s+russell\b", re.IGNORECASE),
 )
 
 # Extra context that raises confidence when "MSCI" alone is ambiguous. Used for
@@ -79,7 +85,11 @@ class MSCIReview:
 _REVIEW_CALENDAR: List[MSCIReview] = [
     MSCIReview("February 2026 Review", date(2026, 2, 10), "Quarterly"),
     MSCIReview("May 2026 Review", date(2026, 5, 12), "Semi-Annual"),
-    MSCIReview("August 2026 Review", date(2026, 8, 11), "Quarterly"),
+    # Corrected to the 12th from the ingested coverage itself ("MSCI Umumkan
+    # Rebalancing Saham 12 Agustus"). A reminder that these are scheduled
+    # dates, not scraped ones — when the news contradicts the table, the news
+    # wins and the table needs updating.
+    MSCIReview("August 2026 Review", date(2026, 8, 12), "Quarterly"),
     MSCIReview("November 2026 Review", date(2026, 11, 10), "Semi-Annual"),
     MSCIReview("February 2027 Review", date(2027, 2, 9), "Quarterly"),
     MSCIReview("May 2027 Review", date(2027, 5, 11), "Semi-Annual"),
@@ -87,8 +97,35 @@ _REVIEW_CALENDAR: List[MSCIReview] = [
     MSCIReview("November 2027 Review", date(2027, 11, 9), "Semi-Annual"),
 ]
 
+# FTSE Russell GEIS reviews run on a March/June/September/December cycle —
+# offset from MSCI's Feb/May/Aug/Nov, so between the two there is an index
+# event roughly every six weeks. Same caveat as the MSCI dates: entered from
+# the published calendar, not scraped, and FTSE does move them.
+_FTSE_CALENDAR: List["MSCIReview"] = []   # populated below, after MSCIReview
+
 # Days before an announcement that trigger a heads-up.
 REMINDER_LEAD_DAYS = 3
+
+
+def _ftse_calendar() -> List["MSCIReview"]:
+    """FTSE Russell quarterly review dates (announcement, not effective)."""
+    return [
+        MSCIReview("FTSE March 2026 Review", date(2026, 3, 6), "FTSE Quarterly"),
+        MSCIReview("FTSE June 2026 Review", date(2026, 6, 5), "FTSE Quarterly"),
+        MSCIReview("FTSE September 2026 Review", date(2026, 9, 4), "FTSE Quarterly"),
+        MSCIReview("FTSE December 2026 Review", date(2026, 12, 4), "FTSE Quarterly"),
+        MSCIReview("FTSE March 2027 Review", date(2027, 3, 5), "FTSE Quarterly"),
+        MSCIReview("FTSE June 2027 Review", date(2027, 6, 4), "FTSE Quarterly"),
+        MSCIReview("FTSE September 2027 Review", date(2027, 9, 3), "FTSE Quarterly"),
+        MSCIReview("FTSE December 2027 Review", date(2027, 12, 3), "FTSE Quarterly"),
+    ]
+
+
+def all_reviews() -> List["MSCIReview"]:
+    """MSCI and FTSE dates merged, chronological."""
+    return sorted(
+        _REVIEW_CALENDAR + _ftse_calendar(), key=lambda r: r.announcement
+    )
 
 
 # ── Detection ────────────────────────────────────────────────────────────────
@@ -152,7 +189,7 @@ def tag_items(items: Sequence[Any]) -> List[Any]:
 def upcoming_reviews(today: Optional[date] = None, limit: int = 4) -> List[MSCIReview]:
     """Scheduled reviews on or after `today`, soonest first."""
     today = today or datetime.now(timezone.utc).date()
-    return [r for r in _REVIEW_CALENDAR if r.announcement >= today][:limit]
+    return [r for r in all_reviews() if r.announcement >= today][:limit]
 
 
 def next_review(today: Optional[date] = None) -> Optional[MSCIReview]:
@@ -169,7 +206,7 @@ def due_reminders(today: Optional[date] = None) -> List[Dict[str, Any]]:
     """
     today = today or datetime.now(timezone.utc).date()
     out: List[Dict[str, Any]] = []
-    for r in _REVIEW_CALENDAR:
+    for r in all_reviews():
         delta = (r.announcement - today).days
         if delta == REMINDER_LEAD_DAYS:
             out.append({"review": r, "days_out": delta, "stage": "upcoming"})

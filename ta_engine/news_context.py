@@ -251,3 +251,42 @@ def summarise(events: Sequence[VolumeEvent], currency: str = "IDR") -> Optional[
             "lonjakan tanpa katalis publik."
         )
     return "".join(parts)
+
+
+def recent_for_ticker(
+    news: Sequence[Dict[str, Any]], limit: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    The most recent headlines for a ticker, newest first — unfiltered.
+
+    Deliberately NOT curated. No importance threshold, no sentiment screen, no
+    dropping of unflattering stories: a reader forming conviction needs to see
+    the bad news as readily as the good, and a feed that quietly hides negative
+    coverage is worse than no feed because it looks complete.
+
+    `news` is expected pre-filtered to the ticker by the caller (the repository
+    query does this), so this only orders and truncates.
+    """
+    def when(item: Dict[str, Any]) -> str:
+        return str(item.get("published_at") or item.get("publishedAt") or "")
+
+    ordered = sorted(news, key=when, reverse=True)
+
+    out: List[Dict[str, Any]] = []
+    seen_titles = set()
+    for item in ordered:
+        title = (item.get("title") or "").strip()
+        if not title or title in seen_titles:
+            continue
+        seen_titles.add(title)
+        out.append({
+            "title": title,
+            "source": item.get("source"),
+            "url": item.get("url"),
+            "importance": item.get("importance"),
+            "publishedAt": when(item),
+            "isMsciAlert": bool(item.get("is_msci_alert") or item.get("isMsciAlert")),
+        })
+        if len(out) >= limit:
+            break
+    return out

@@ -11,7 +11,7 @@ command/long-poll half, which has grown large.
 
 import html
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.models.news import News
 
@@ -268,3 +268,68 @@ async def send_ihsg_overview(chat_id: str, overview: Dict[str, Any]) -> bool:
     except Exception as exc:
         logger.warning("sender.ihsg_failed chat=%s error=%s", chat_id, exc)
         return False
+
+
+def format_index_calendar(snapshot: Dict[str, Any], compact: bool = False) -> str:
+    """
+    Upcoming MSCI + FTSE review dates.
+
+    Appended to EVERY daily digest, not only at T-3 and day-of. Index
+    rebalancing is the one recurring event where the date is knowable in
+    advance and the flows are mechanical, so a user should never be surprised
+    by one — a reminder they see daily costs a line of text; a missed
+    repositioning window costs money.
+    """
+    up = snapshot.get("upcoming") or []
+    if not up:
+        return ""
+
+    if compact:
+        nxt = snapshot.get("next")
+        if not nxt:
+            return ""
+        return (
+            f"📅 <b>Indeks berikutnya:</b> {html.escape(nxt['name'])} — "
+            f"{nxt['announcement']} ({nxt['daysOut']} hari lagi)"
+        )
+
+    lines = ["📅 <b>Jadwal review indeks (MSCI &amp; FTSE)</b>"]
+    for r in up[:4]:
+        days = r["daysOut"]
+        when = "HARI INI" if days == 0 else f"{days} hari lagi"
+        flag = "🚨" if days <= 3 else "•"
+        lines.append(
+            f"{flag} {html.escape(r['name'])} — <b>{r['announcement']}</b> ({when})"
+        )
+    lines.append(
+        "<i>Rebalancing memicu arus beli/jual mekanis dari dana indeks. "
+        "Tanggal dari kalender resmi dan bisa berubah.</i>"
+    )
+    return "\n".join(lines)
+
+
+def format_ticker_news(items: List[Dict[str, Any]], ticker: str) -> str:
+    """
+    Recent headlines for a ticker — unfiltered.
+
+    Good and bad both appear, in date order, with no importance threshold and
+    no sentiment screen. A feed that quietly drops unflattering coverage is
+    worse than no feed, because it still looks complete: the reader forms
+    conviction on a picture that was edited without telling them.
+    """
+    if not items:
+        return (
+            f"📰 <i>Belum ada berita {html.escape(ticker)} di cache — "
+            f"bukan berarti tidak ada, sumber kami mungkin belum memuatnya.</i>"
+        )
+
+    icon = {"high": "🔴", "medium": "🔵", "low": "⚪"}
+    lines = [f"📰 <b>Berita terbaru {html.escape(ticker)}</b>"]
+    for n in items:
+        dot = icon.get(n.get("importance"), "⚪")
+        when = str(n.get("publishedAt") or "")[:10]
+        src = f" <i>({html.escape(str(n['source']))})</i>" if n.get("source") else ""
+        flag = "🚨 " if n.get("isMsciAlert") else ""
+        lines.append(f"{dot} {flag}<b>{when}</b> {html.escape(str(n['title']))}{src}")
+    lines.append("<i>Ditampilkan apa adanya — positif maupun negatif.</i>")
+    return "\n".join(lines)

@@ -190,6 +190,11 @@ class ChartResult:
     volume_events: List[Dict[str, Any]] = field(default_factory=list)
     volume_summary: Optional[str] = None
 
+    # Latest headlines for this ticker, newest first and UNFILTERED — good
+    # and bad alike. Independent of volume: conviction needs the news even
+    # on a quiet day. Populated by chart_service.
+    recent_news: List[Dict[str, Any]] = field(default_factory=list)
+
     # Momentum divergence, when present. An exhaustion warning, not a
     # reversal signal — divergence can persist through a strong trend.
     rsi_divergence: Optional[Dict[str, Any]] = None

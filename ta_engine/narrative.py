@@ -147,8 +147,30 @@ def build_rationale(result: "ChartResult") -> str:
             "arah. Konfirmasi tetap dari harga.</i>",
         ]
 
-    # Volume + news: the "why" behind the chart. Worded as coincidence, never
-    # causation — a same-day headline is temporal overlap, not proof.
+    # Recent headlines, shown unconditionally and unfiltered. This used to be
+    # gated on a volume spike, which meant most charts carried no news at all —
+    # exactly backwards, since the reason to read news beside a chart is
+    # conviction, and that matters on quiet days too. Good and bad both appear.
+    news = result.recent_news or []
+    if news:
+        icon = {"high": "🔴", "medium": "🔵", "low": "⚪"}
+        lines += ["", f"<b>Berita terbaru {result.ticker}</b>"]
+        for n in news[:5]:
+            dot = icon.get(n.get("importance"), "⚪")
+            when = str(n.get("publishedAt") or "")[:10]
+            flag = "🚨 " if n.get("isMsciAlert") else ""
+            title = n.get("title") or ""
+            lines.append(f"{dot} {flag}<b>{when}</b> {title}")
+        lines.append("<i>Apa adanya — kabar baik maupun buruk.</i>")
+    else:
+        lines += [
+            "",
+            f"<i>📰 Belum ada berita {result.ticker} di cache. Bukan berarti "
+            f"tidak ada — sumber kami mungkin belum memuatnya.</i>",
+        ]
+
+    # Volume spikes are their own section now: where the unusual activity was,
+    # independent of whether a headline happens to explain it.
     events = [e for e in (result.volume_events or [])][:3]
     if events:
         lines += ["", "<b>Aktivitas volume &amp; berita</b>"]

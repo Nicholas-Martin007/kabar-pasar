@@ -438,6 +438,23 @@ def _format_digest(items: List[dict]) -> str:
         if it.get("url"):
             block += f"\n  {it['url']}"
         parts.append(block)
+
+    # Every digest carries the index-review calendar. MSCI and FTSE are the one
+    # recurring market event whose date is knowable in advance and whose flows
+    # are mechanical, so a user should never be caught out by one. A line of
+    # text daily is cheap; a missed repositioning window is not.
+    try:
+        from scrapers.msci_tracker import calendar_snapshot
+
+        from .telegram_sender import format_index_calendar
+
+        cal = format_index_calendar(calendar_snapshot())
+        if cal:
+            parts.append("\n" + cal)
+    except Exception as exc:
+        # A calendar failure must never cost the user their news digest.
+        logger.warning("telegram.digest_calendar_failed error=%s", exc)
+
     return "\n".join(parts)
 
 

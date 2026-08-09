@@ -8,7 +8,7 @@ knows which items need AI summarisation.
 import logging
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -139,15 +139,23 @@ async def query_news(
         stmt = stmt.where(NewsRow.source == source)
     if importance:
         stmt = stmt.where(NewsRow.importance == importance)
-    stmt = stmt.limit(limit)
-
-    rows = (await session.execute(stmt)).scalars().all()
-    items = [_row_to_news(r) for r in rows]
 
     if ticker:
-        ticker = ticker.upper()
-        items = [n for n in items if ticker in n.tickers]
-    return items
+        # Filter in SQL, BEFORE the limit. This used to run in Python on the
+        # already-limited rows, which silently returned nothing whenever the
+        # ticker's articles fell outside the newest `limit`: BBCA had 18 stories
+        # cached and the query answered zero, because none were in the most
+        # recent 400. That hit /news?ticker= and the per-chart news feed alike.
+        #
+        # `tickers` is a JSON array of bare codes, so a LIKE on the quoted code
+        # is an exact element match — '"BBCA"' cannot collide with a longer
+        # code. Not index-backed, but the table is small and correctness here
+        # matters more than the scan.
+        stmt = stmt.where(NewsRow.tickers.cast(Text).like(f'%"{ticker.upper()}"%'))
+
+    stmt = stmt.limit(limit)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [_row_to_news(r) for r in rows]
 
 
 async def count_news(session: AsyncSession) -> int:
