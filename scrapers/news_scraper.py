@@ -3,10 +3,16 @@ Fast-lane news poller.
 
 Polls a small set of high-value feeds far more often than the 5-minute
 `scheduler.refresh_news_job` does, so breaking IDX news reaches connected
-clients in seconds. Items are persisted through the same
-`upsert_news_items` path, whose primary key is `stable_id()` — so this loop and
-the scheduled refresh can both run without ever double-inserting: whichever
-arrives first writes the row, the other sees zero new items.
+clients in seconds. Items are persisted through the same `upsert_news_items`
+path, keyed on `stable_id()`.
+
+This loop and the scheduled refresh genuinely run CONCURRENTLY — both start in
+the app lifespan — so they routinely fetch the same article at the same moment.
+Safety there comes from `upsert_news_items` using INSERT .. ON CONFLICT DO
+NOTHING .. RETURNING, which lets the database arbitrate. An earlier version
+checked for existing ids first and inserted after; that read-then-write gap
+raced and crashed a whole poll cycle on a UNIQUE violation in production. Do
+not reintroduce a pre-check as the safety mechanism — it cannot be one.
 
 Politeness (this is the part that keeps us un-banned):
 

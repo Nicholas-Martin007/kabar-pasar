@@ -6,9 +6,14 @@ knows which items need AI summarisation.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Text, select
+# SQLite dialect insert for ON CONFLICT DO NOTHING. If DATABASE_URL is ever
+# pointed at PostgreSQL (the documented swap), import its insert instead —
+# the on_conflict_do_nothing API is the same shape.
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -48,42 +53,67 @@ def _row_to_news(row: NewsRow) -> News:
 # ── Writes ────────────────────────────────────────────────────────────────────
 
 async def upsert_news_items(session: AsyncSession, items: List[News]) -> List[News]:
-    """Insert news rows that don't exist yet. Returns the NEW items only."""
+    """
+    Insert news rows that don't exist yet. Returns the NEW items only.
+
+    Uses INSERT .. ON CONFLICT DO NOTHING .. RETURNING id, which is ATOMIC.
+
+    The previous SELECT-then-INSERT was a time-of-check/time-of-use race, and it
+    fired in production: the fast poller and the scheduled refresh both start at
+    boot, both fetched the same Yahoo article, both saw "not present", and the
+    second INSERT died on the unique constraint — taking the whole fast-poll
+    cycle down with it. Checking first cannot fix that, because any gap between
+    the check and the write is a window for the other producer. The database has
+    to arbitrate.
+
+    RETURNING is what keeps `new_items` truthful under the same race: only the
+    producer whose row actually landed sees it as new, so alerts and AI
+    summarisation still fire exactly once.
+    """
     if not items:
         return []
 
-    ids = [n.id for n in items]
-    existing_ids = set(
-        (await session.execute(select(NewsRow.id).where(NewsRow.id.in_(ids))))
-        .scalars()
-        .all()
-    )
-
-    new_items = [n for n in items if n.id not in existing_ids]
-    for item in new_items:
-        # Classify at write time so the flag is durable: the alert path, the API
-        # and any later re-read all see the same decision, and re-running the
-        # matcher on every read would be wasted work.
+    # Classify at write time so the flag is durable: the alert path, the API and
+    # any later re-read all see the same decision.
+    rows = []
+    by_id: Dict[str, News] = {}
+    now = datetime.now(timezone.utc)
+    for item in items:
+        if item.id in by_id:
+            continue  # same article twice within one batch
         msci = classify_msci(item.title, item.excerpt or "")
         item.is_msci_alert = msci["is_msci_alert"]
         item.priority = msci["priority"]
-        session.add(NewsRow(
-            id=item.id,
-            title=item.title,
-            source=item.source.value,
-            published_at=item.published_at,
-            excerpt=item.excerpt,
-            tickers=item.tickers,
-            importance=item.importance.value,
-            category=item.category.value,
-            url=item.url,
-            is_msci_alert=item.is_msci_alert,
-            priority=item.priority,
-        ))
+        by_id[item.id] = item
+        rows.append({
+            "id": item.id,
+            "title": item.title,
+            "source": item.source.value,
+            "published_at": item.published_at,
+            "excerpt": item.excerpt,
+            "tickers": item.tickers,
+            "importance": item.importance.value,
+            "category": item.category.value,
+            "url": item.url,
+            "is_msci_alert": item.is_msci_alert,
+            "priority": item.priority,
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    stmt = (
+        sqlite_insert(NewsRow)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["id"])
+        .returning(NewsRow.id)
+    )
+    inserted_ids = set((await session.execute(stmt)).scalars().all())
     await session.commit()
+
+    new_items = [by_id[i] for i in inserted_ids if i in by_id]
     logger.info(
         "repo.upsert total=%d existing=%d new=%d",
-        len(items), len(existing_ids), len(new_items),
+        len(rows), len(rows) - len(new_items), len(new_items),
     )
     return new_items
 
