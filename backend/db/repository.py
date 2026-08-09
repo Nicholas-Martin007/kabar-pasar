@@ -641,3 +641,35 @@ async def backfill_tickers(session: AsyncSession) -> int:
         await session.commit()
     logger.info("repo.ticker_backfill scanned=%d tagged=%d", len(rows), updated)
     return updated
+
+
+async def query_index_news(
+    session: AsyncSession, limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    MSCI/FTSE-flagged articles, newest first.
+
+    Its own query rather than a filter on `query_news` because index news is a
+    routing class, not a content filter: it ignores ticker and importance
+    entirely.
+    """
+    rows = (
+        await session.execute(
+            select(NewsRow)
+            .where(NewsRow.is_msci_alert.is_(True))
+            .order_by(NewsRow.published_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "source": r.source,
+            "url": r.url,
+            "published_at": r.published_at,
+            "tickers": list(r.tickers or []),
+            "priority": r.priority,
+        }
+        for r in rows
+    ]

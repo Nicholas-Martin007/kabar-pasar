@@ -611,6 +611,10 @@ async def _handle_command(chat_id: str, text: str) -> None:
         await send_chart(chat_id, symbol)
         return
 
+    if cmd in ("msci", "ftse", "indeks"):
+        await send_index_digest(chat_id)
+        return
+
     if cmd == "ihsg":
         await send_message(chat_id, "⏳ Menyiapkan ringkasan IHSG…")
         await send_ihsg_report(chat_id)
@@ -793,3 +797,97 @@ async def poll_updates_loop() -> None:
         except Exception as exc:
             logger.warning("telegram.poll_error error=%s", exc)
             await asyncio.sleep(5)
+
+
+# ── Index review (MSCI / FTSE) ───────────────────────────────────────────────
+
+
+async def dispatch_index_reminders() -> int:
+    """
+    Push MSCI/FTSE review reminders that are due today.
+
+    Runs once a day. `due_reminders()` only returns a review at exactly T-3 or
+    on the day itself, so this is silent on every other date — the scheduling
+    is a daily *check*, not a daily message.
+
+    This job is the piece that was missing: the calendar, the due-date logic and
+    the formatter all existed, but nothing ever called them, so no reminder had
+    ever actually been sent.
+    """
+    from scrapers.msci_tracker import due_reminders
+
+    from .telegram_sender import format_msci_reminder
+
+    if not _token():
+        return 0
+
+    due = due_reminders()
+    if not due:
+        logger.info("telegram.index_reminders none_due")
+        return 0
+
+    async with get_session() as session:
+        subs = await repo.list_subscribers(session)
+
+    sent = 0
+    for sub in subs:
+        # Gated on the master news switch only. A calendar date is not a stock
+        # tip, so watchlist and high-only filters should not hide it — but a
+        # user who turned notifications off entirely still gets nothing.
+        if not sub.get("news_alerts", True):
+            continue
+        for item in due:
+            r = item["review"]
+            try:
+                await send_message(
+                    str(sub["chat_id"]),
+                    format_msci_reminder(
+                        r.name, r.announcement.isoformat(), item["days_out"]
+                    ),
+                )
+                sent += 1
+            except Exception as exc:
+                logger.warning("telegram.index_reminder_failed error=%s", exc)
+
+    logger.info("telegram.index_reminders sent=%d due=%d", sent, len(due))
+    return sent
+
+
+async def send_index_digest(chat_id: str, limit: int = 8) -> bool:
+    """
+    On-demand MSCI/FTSE view: flagged headlines plus the upcoming calendar.
+
+    Exists because index news was reaching the database but had no surface —
+    items flagged by the backfill were never "new at ingest", so the alert path
+    never saw them and they stayed invisible.
+    """
+    from scrapers.msci_tracker import calendar_snapshot
+
+    from .telegram_sender import format_index_calendar
+
+    try:
+        async with get_session() as session:
+            rows = await repo.query_index_news(session, limit=limit)
+    except Exception as exc:
+        logger.warning("telegram.index_digest_failed error=%s", exc)
+        await send_message(chat_id, "⚠️ Gagal mengambil berita indeks.")
+        return False
+
+    parts = ["🌐 <b>Berita MSCI &amp; FTSE</b>", ""]
+    if rows:
+        for n in rows:
+            when = str(n.get("published_at") or "")[:10]
+            title = html.escape(str(n.get("title") or ""))
+            url = n.get("url")
+            body = f'<a href="{html.escape(str(url))}">{title}</a>' if url else title
+            src = f" <i>· {html.escape(str(n.get('source') or ''))}</i>"
+            parts.append(f"🚨 <b>{when}</b> {body}{src}")
+    else:
+        parts.append("<i>Belum ada berita MSCI/FTSE di cache.</i>")
+
+    cal = format_index_calendar(calendar_snapshot())
+    if cal:
+        parts += ["", cal]
+
+    await send_message(chat_id, "\n".join(parts))
+    return True

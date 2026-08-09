@@ -17,7 +17,12 @@ from backend.db.session import get_session
 from backend.services.events import bus
 from ai_engine.ai_summarizer import summarize_batch
 from scrapers.rss_service import fetch_all_news
-from telegram_bot.telegram_service import dispatch_alerts, dispatch_digest, send_test_news
+from telegram_bot.telegram_service import (
+    dispatch_alerts,
+    dispatch_digest,
+    dispatch_index_reminders,
+    send_test_news,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,9 @@ _DIGEST_HOUR_WIB = int(os.getenv("DIGEST_HOUR_WIB", "17"))  # 17:00 WIB default
 # Hourly "to read" digest: top N news every N hours (0 = off).
 _HOURLY_DIGEST_HOURS = int(os.getenv("HOURLY_DIGEST_HOURS", "1"))
 _HOURLY_DIGEST_COUNT = int(os.getenv("HOURLY_DIGEST_COUNT", "10"))
+# Hour (WIB) for the daily MSCI/FTSE index-review check. Morning, so a T-3
+# heads-up lands before the session rather than after it.
+_INDEX_REMINDER_HOUR_WIB = int(os.getenv("INDEX_REMINDER_HOUR_WIB", "8"))
 # Testing only: send a Telegram ping every N seconds (0 = off). Never use in prod.
 _TEST_ALERT_SECONDS = int(os.getenv("TEST_ALERT_SECONDS", "0"))
 
@@ -91,6 +99,23 @@ async def hourly_digest_job() -> None:
         logger.warning("scheduler.hourly_digest_failed error=%s", exc)
 
 
+async def index_reminder_job() -> None:
+    """
+    Daily MSCI/FTSE review check.
+
+    Runs every day but only SENDS at T-3 and on the announcement date — see
+    due_reminders(). Scheduling the check daily is what makes the reminder
+    reliable; the calendar and formatter already existed but nothing invoked
+    them, so no reminder had ever fired.
+    """
+    try:
+        sent = await dispatch_index_reminders()
+        if sent:
+            logger.info("scheduler.index_reminder.sent count=%d", sent)
+    except Exception as exc:
+        logger.warning("scheduler.index_reminder_failed error=%s", exc)
+
+
 async def test_ping_job() -> None:
     try:
         await send_test_news()
@@ -137,6 +162,20 @@ def start_scheduler() -> AsyncIOScheduler:
             coalesce=True,
             replace_existing=True,
         )
+
+    # Daily index-review check (MSCI + FTSE). Silent unless a review is at
+    # T-3 or today.
+    _scheduler.add_job(
+        index_reminder_job,
+        trigger=CronTrigger(
+            hour=(_INDEX_REMINDER_HOUR_WIB - 7) % 24, minute=5, timezone=timezone.utc
+        ),
+        id="index_reminders",
+        name="MSCI/FTSE index review reminder",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
 
     # Testing only: rapid Telegram ping to evaluate delivery.
     if _TEST_ALERT_SECONDS > 0:
