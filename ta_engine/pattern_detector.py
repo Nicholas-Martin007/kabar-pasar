@@ -1142,3 +1142,103 @@ def detect_rsi_divergence(
             best["type"], best["rsi_gap"], best["bars_apart"],
         )
     return best
+
+
+# ── Plain-language pattern reference ─────────────────────────────────────────
+
+# What each formation is, how it USUALLY resolves, what confirms it and what
+# kills it. Written out so the bot can explain itself rather than emitting a
+# name and a number: a user who is told "Ascending Triangle, target 5,475" and
+# nothing else has no way to judge the call, and no way to know it was
+# conditional. Every entry names the invalidation, because the thing that makes
+# a pattern honest is stating in advance what would prove it wrong.
+#
+# "usually" is doing real work in these strings and is deliberate. Classical
+# patterns fail often — a breakout that reverses back through the boundary is
+# an ordinary outcome, not an anomaly — so none of this is phrased as what the
+# price WILL do.
+PATTERN_GUIDE: Dict[str, Dict[str, str]] = {
+    "Ascending Triangle": {
+        "what": "Resistance datar ditekan berulang, sementara support naik — penjual bertahan di satu harga, pembeli berani makin tinggi.",
+        "usually": "Lebih sering tembus ke ATAS saat resistance jebol.",
+        "confirm": "Close di atas garis resistance, idealnya dengan volume naik.",
+        "invalid": "Close di bawah garis support naik — tekanan beli hilang.",
+    },
+    "Descending Triangle": {
+        "what": "Support datar diuji berulang, sementara resistance turun — pembeli bertahan di satu harga, penjual makin agresif.",
+        "usually": "Lebih sering tembus ke BAWAH saat support jebol.",
+        "confirm": "Close di bawah garis support, idealnya dengan volume naik.",
+        "invalid": "Close di atas garis resistance turun.",
+    },
+    "Symmetrical Triangle": {
+        "what": "Harga menyempit dari dua sisi — pembeli dan penjual sama-sama mengecil ruangnya.",
+        "usually": "Arahnya BELUM ditentukan; biasanya lanjut ke arah tren sebelum pola terbentuk.",
+        "confirm": "Close tegas keluar dari salah satu sisi segitiga.",
+        "invalid": "Harga bolak-balik keluar-masuk garis (false break) — pola batal.",
+    },
+    "Rising Wedge": {
+        "what": "Harga masih naik tapi rentangnya menyempit — kenaikan makin kehabisan tenaga.",
+        "usually": "Lebih sering pecah ke BAWAH meski trennya sedang naik.",
+        "confirm": "Close di bawah garis support wedge.",
+        "invalid": "Close tegas di atas garis atas wedge — tren naik berlanjut.",
+    },
+    "Falling Wedge": {
+        "what": "Harga masih turun tapi rentangnya menyempit — tekanan jual mulai habis.",
+        "usually": "Lebih sering pecah ke ATAS meski trennya sedang turun.",
+        "confirm": "Close di atas garis resistance wedge.",
+        "invalid": "Close tegas di bawah garis bawah wedge — penurunan berlanjut.",
+    },
+    "Bull Flag": {
+        "what": "Kenaikan tajam (tiang), lalu istirahat menyamping/menurun tipis dengan volume mengecil.",
+        "usually": "Lebih sering LANJUT NAIK sebesar tinggi tiang.",
+        "confirm": "Close di atas batas atas flag dengan volume kembali naik.",
+        "invalid": "Close di bawah batas bawah flag.",
+    },
+    "Bear Flag": {
+        "what": "Penurunan tajam (tiang), lalu rebound tipis dengan volume mengecil.",
+        "usually": "Lebih sering LANJUT TURUN sebesar tinggi tiang.",
+        "confirm": "Close di bawah batas bawah flag.",
+        "invalid": "Close di atas batas atas flag.",
+    },
+    "Bull Pennant": {
+        "what": "Kenaikan tajam lalu konsolidasi menyempit membentuk segitiga kecil.",
+        "usually": "Lebih sering LANJUT NAIK setelah keluar dari pennant.",
+        "confirm": "Close di atas garis atas pennant dengan volume naik.",
+        "invalid": "Close di bawah garis bawah pennant.",
+    },
+    "Bear Pennant": {
+        "what": "Penurunan tajam lalu konsolidasi menyempit membentuk segitiga kecil.",
+        "usually": "Lebih sering LANJUT TURUN setelah keluar dari pennant.",
+        "confirm": "Close di bawah garis bawah pennant.",
+        "invalid": "Close di atas garis atas pennant.",
+    },
+    "Double Top": {
+        "what": "Dua puncak di harga hampir sama, gagal menembus lebih tinggi.",
+        "usually": "Sinyal PEMBALIKAN ke bawah bila neckline jebol.",
+        "confirm": "Close di bawah neckline (lembah di antara dua puncak).",
+        "invalid": "Close di atas puncak tertinggi — pola batal.",
+    },
+    "Double Bottom": {
+        "what": "Dua lembah di harga hampir sama, gagal turun lebih dalam.",
+        "usually": "Sinyal PEMBALIKAN ke atas bila neckline tertembus.",
+        "confirm": "Close di atas neckline (puncak di antara dua lembah).",
+        "invalid": "Close di bawah lembah terendah — pola batal.",
+    },
+    "Head and Shoulders": {
+        "what": "Tiga puncak: tengah tertinggi, dua bahu lebih rendah dan seimbang.",
+        "usually": "Sinyal PEMBALIKAN ke bawah bila neckline jebol.",
+        "confirm": "Close di bawah neckline, idealnya dengan volume naik.",
+        "invalid": "Close di atas puncak kepala — pola batal.",
+    },
+    "Inverse Head and Shoulders": {
+        "what": "Tiga lembah: tengah terdalam, dua bahu lebih dangkal dan seimbang.",
+        "usually": "Sinyal PEMBALIKAN ke atas bila neckline tertembus.",
+        "confirm": "Close di atas neckline, idealnya dengan volume naik.",
+        "invalid": "Close di bawah lembah kepala — pola batal.",
+    },
+}
+
+
+def explain_pattern(name: str) -> Optional[Dict[str, str]]:
+    """Reference entry for `name`, or None if the pattern isn't documented."""
+    return PATTERN_GUIDE.get(name)

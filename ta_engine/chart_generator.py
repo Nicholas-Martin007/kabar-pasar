@@ -672,6 +672,60 @@ def _render_chart(
                     ),
                 )
 
+            # Project each pattern boundary forward into the blank margin, and
+            # mark where the measured move points. Dotted, never solid: the
+            # solid part is price that happened, the dotted part is arithmetic
+            # about price that has NOT happened. A single line style for both
+            # would present a projection as though it were history.
+            if patterns and show_trade:
+                best_p = patterns[0]
+                pos_of = {d: i for i, d in enumerate(plot_df.index)}
+                n_vis = len(plot_df)
+                proj_color = (
+                    _PATTERN_BULL_COLOR if best_p.direction == "bullish"
+                    else _PATTERN_BEAR_COLOR if best_p.direction == "bearish"
+                    else _PATTERN_NEUTRAL_COLOR
+                )
+                for seg in best_p.lines:
+                    pts = [(pos_of.get(pd.Timestamp(ts)), pr) for ts, pr in seg]
+                    pts = [(x, y) for x, y in pts if x is not None]
+                    if len(pts) < 2:
+                        continue
+                    (x0, y0), (x1, y1) = pts[0], pts[-1]
+                    if x1 <= x0:
+                        continue
+                    slope = (y1 - y0) / (x1 - x0)
+                    x_end = n_vis - 1 + _RIGHT_MARGIN_BARS
+                    ax.plot(
+                        [x1, x_end], [y1, y1 + slope * (x_end - x1)],
+                        color=proj_color, linestyle=":", linewidth=1.2,
+                        alpha=0.75, zorder=2,
+                    )
+
+                target = (best_p.key_levels or {}).get("target")
+                if target is not None:
+                    lo_y, hi_y = ax.get_ylim()
+                    x_lab = n_vis - 1 + _RIGHT_MARGIN_BARS * 0.5
+                    if target > hi_y:
+                        # Measured move sits above the visible range. Pin the
+                        # label to the top edge with an arrow rather than
+                        # rescaling — BMRI's target is 29% above spot, and
+                        # stretching the axis to reach it would flatten every
+                        # candle into a line.
+                        y_lab, txt = hi_y - (hi_y - lo_y) * 0.03, f"▲ proyeksi {fmt(target)}"
+                    elif target < lo_y:
+                        y_lab, txt = lo_y + (hi_y - lo_y) * 0.03, f"▼ proyeksi {fmt(target)}"
+                    else:
+                        y_lab, txt = target, f"proyeksi {fmt(target)}"
+                    ax.annotate(
+                        txt,
+                        xy=(x_lab, y_lab), xycoords="data",
+                        ha="center", va="center",
+                        fontsize=7.5, color=proj_color, weight="bold",
+                        bbox=dict(boxstyle="round,pad=0.28", facecolor="#0F1521",
+                                  edgecolor=proj_color, linewidth=0.8, alpha=0.92),
+                    )
+
             # Mark unusual-volume bars on the price panel. These are where the
             # news linkage hangs — the marker says "something happened here",
             # and the payload/caption says what (or that nothing was found).

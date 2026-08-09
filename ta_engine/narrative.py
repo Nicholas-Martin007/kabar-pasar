@@ -14,6 +14,7 @@ disclaimer travels with it.
 import html
 from typing import TYPE_CHECKING, List
 
+from .pattern_detector import explain_pattern
 from .price_utils import format_price
 
 if TYPE_CHECKING:  # avoid a circular import at runtime
@@ -66,19 +67,6 @@ def build_rationale(result: "ChartResult") -> str:
         "<b>Level kunci</b>",
     ]
 
-    # Mirror the chart's sentiment badge. Without this the image says
-    # "WARNING / BEARISH" while the caption beside it says nothing, and the
-    # reader has to reconcile the two.
-    if result.pattern_detected and result.pattern_name:
-        icon = {"BULLISH": "🟢", "BEARISH_WARNING": "🔴"}.get(result.sentiment, "🟡")
-        tf = result.selected_timeframe.upper()
-        lines += [
-            "",
-            f"{icon} <b>Pola terdeteksi:</b> {result.pattern_name} "
-            f"({tf}, kemiripan bentuk {result.quality_score * 100:.0f}%)",
-            "<i>Skor = seberapa rapi bentuknya, bukan peluang berhasil.</i>",
-        ]
-
     if result.support is not None:
         lines.append(f"🟢 Support: <b>{format_price(result.support, cur)}</b>")
     else:
@@ -87,6 +75,54 @@ def build_rationale(result: "ChartResult") -> str:
         lines.append(f"🔴 Resistance: <b>{format_price(result.resistance, cur)}</b>")
     else:
         lines.append("🔴 Resistance: <i>tidak terdeteksi di atas harga</i>")
+
+    # Mirror the chart's sentiment badge. Without this the image says
+    # "WARNING / BEARISH" while the caption beside it says nothing, and the
+    # reader has to reconcile the two.
+    if result.pattern_detected and result.pattern_name:
+        icon = {"BULLISH": "🟢", "BEARISH_WARNING": "🔴"}.get(result.sentiment, "🟡")
+        bias = {
+            "BULLISH": "condong BULLISH",
+            "BEARISH_WARNING": "condong BEARISH",
+        }.get(result.sentiment, "arah BELUM tentu")
+        tf = result.selected_timeframe.upper()
+        lines += [
+            "",
+            _DIV,
+            f"{icon} <b>Pola: {result.pattern_name}</b> — {bias}",
+            f"<i>{tf} · kemiripan bentuk {result.quality_score * 100:.0f}% "
+            f"(serapi apa bentuknya, bukan peluang berhasil)</i>",
+        ]
+
+        # Spell the pattern out. A name and a target with no explanation gives
+        # the reader nothing to judge, and no way to see that the projection is
+        # CONDITIONAL on a breakout that has not happened yet.
+        guide = explain_pattern(result.pattern_name)
+        if guide:
+            lines += [
+                "",
+                f"📖 <b>Apa ini:</b> {guide['what']}",
+                f"↗️ <b>Biasanya:</b> {guide['usually']}",
+                f"✅ <b>Valid kalau:</b> {guide['confirm']}",
+                f"❌ <b>Batal kalau:</b> {guide['invalid']}",
+            ]
+
+        if result.pattern_breakout is not None and result.pattern_target is not None:
+            lines += [
+                "",
+                f"📐 <b>Proyeksi (BELUM terjadi):</b> kalau tembus "
+                f"<b>{format_price(result.pattern_breakout, cur)}</b>, measured move "
+                f"mengarah ke <b>{format_price(result.pattern_target, cur)}</b>.",
+                "<i>Garis titik-titik di chart adalah proyeksi, bukan harga yang "
+                "sudah terjadi. Selama belum tembus, pola ini belum berlaku.</i>",
+            ]
+
+        lines.append(
+            "<i>⚠️ Pola teknikal sering gagal. Breakout bisa berbalik (false "
+            "break), dan target measured move belum tentu tercapai. Ini alat "
+            "bantu baca grafik, bukan ramalan harga.</i>"
+        )
+
 
     # The scenario heading must match the frame. Labelling a breakdown "asumsi
     # posisi BELI" would tell the reader to buy the exact setup the chart is
@@ -146,13 +182,6 @@ def build_rationale(result: "ChartResult") -> str:
         # Bearish or index: say why there is no buy zone instead of omitting it,
         # so a missing section never reads as an oversight.
         lines += ["", f"<i>{result.entry_note}</i>"]
-
-    if result.pattern_target is not None and result.pattern_breakout is not None:
-        lines += [
-            "",
-            f"📐 Measured move pola: tembus <b>{format_price(result.pattern_breakout, cur)}</b> "
-            f"→ proyeksi <b>{format_price(result.pattern_target, cur)}</b>",
-        ]
 
     # Valuation, so the reader sees whether the chart is attached to a business
     # that earns money. Metrics that failed validation are simply absent — see
