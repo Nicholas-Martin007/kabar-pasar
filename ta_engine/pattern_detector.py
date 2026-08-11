@@ -60,6 +60,9 @@ FLAT_SLOPE_TOL = 0.02
 TOUCH_TOL = 0.02
 # Boundaries must narrow by at least this fraction to count as converging.
 MIN_CONVERGENCE = 0.20
+# Slack allowed for a pivot to poke past its own boundary, in ATR. Wicks are
+# noisy; demanding a perfect hull would let one stray tick reject a clean line.
+BOUNDARY_TOL_ATR = 0.25
 # Only patterns at or above this score are returned.
 MIN_QUALITY = 0.80
 # A pattern is only a *setup* while its breakout is still ahead or very recent.
@@ -123,6 +126,15 @@ class Pattern:
     end_idx: int
     volume_confirmed: bool
     score_breakdown: Dict[str, float] = field(default_factory=dict)
+    # Has price already left the pattern? "pending" | "broke_up" | "broke_down".
+    #
+    # A Rising Wedge is bearish ONLY if it breaks down. ICBP closed 2.3 ATR
+    # above its own upper boundary and the engine still projected a downside
+    # target from it — a thesis price had already refuted. Reporting a
+    # conditional projection on a resolved pattern is exactly the kind of
+    # mistake a reader would rightly blame the bot for.
+    resolution: str = "pending"
+    resolution_atr: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -225,11 +237,104 @@ def fit_line(xs: Sequence[float], ys: Sequence[float]) -> Tuple[float, float, fl
     return float(slope), float(intercept), float(r2)
 
 
-def build_trendline(pivots: Sequence[Pivot], all_same_kind: Sequence[Pivot]) -> TrendLine:
-    """Fit a line to `pivots` and count how many of `all_same_kind` touch it."""
+def fit_boundary(
+    pivots: Sequence[Pivot], side: str, tol: float
+) -> Tuple[float, float, float]:
+    """
+    True support/resistance boundary -> (slope, intercept, r2).
+
+    A least-squares fit runs through the MIDDLE of the pivots, leaving about
+    half of them on the wrong side. That is a regression, not a boundary: on
+    ICBP's Rising Wedge a swing high sat 2.3 ATR ABOVE its own "upper boundary",
+    which is visibly wrong on the chart and makes the breakout level meaningless
+    — price had already been above the line repeatedly without breaking out.
+
+    A real trendline is a hull edge: it TOUCHES the extreme pivots and keeps
+    every other one on one side of it. With at most a handful of pivots, simply
+    enumerating every pair is cheap and finds exactly that edge.
+
+    `tol` is the price slack (an ATR fraction) allowed for a pivot to sit
+    marginally outside — wicks are noisy, and demanding a perfect hull would
+    make one stray tick reject an otherwise clean line.
+
+    Falls back to the least-squares line, shifted out to the extreme pivot, if
+    no pair yields a clean edge.
+    """
+    xs = [float(p.idx) for p in pivots]
+    ys = [float(p.price) for p in pivots]
+    n = len(xs)
+    if n < 2:
+        return fit_line(xs, ys)
+
+    upper = side == "upper"
+    best: Optional[Tuple[int, int, float, float]] = None  # touches, span, slope, b
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if xs[j] == xs[i]:
+                continue
+            slope = (ys[j] - ys[i]) / (xs[j] - xs[i])
+            intercept = ys[i] - slope * xs[i]
+
+            touches = violations = 0
+            for x, y in zip(xs, ys):
+                gap = y - (slope * x + intercept)
+                if not upper:
+                    gap = -gap
+                if gap > tol:
+                    violations += 1
+                    break
+                if abs(gap) <= tol:
+                    touches += 1
+            if violations:
+                continue
+
+            span = abs(xs[j] - xs[i])
+            cand = (touches, span, slope, intercept)
+            # More pivots on the line wins; a longer base breaks ties, because a
+            # line anchored on two adjacent pivots says very little.
+            if best is None or (cand[0], cand[1]) > (best[0], best[1]):
+                best = cand
+
+    if best is None:
+        # No clean edge (pivots not convex on this side). Keep the regression
+        # slope but slide the line out until nothing sits beyond it, so the
+        # result is still a boundary rather than a mid-line.
+        slope, _b, _r2 = fit_line(xs, ys)
+        offsets = [y - slope * x for x, y in zip(xs, ys)]
+        intercept = max(offsets) if upper else min(offsets)
+    else:
+        _t, _s, slope, intercept = best
+
+    # r2 against the pivots, for the quality score. A boundary is not trying to
+    # minimise squared error, so this measures how well the pivots line up along
+    # it — which is what "conformance" should mean.
+    pred = [slope * x + intercept for x in xs]
+    ss_res = float(sum((y - p) ** 2 for y, p in zip(ys, pred)))
+    mean_y = sum(ys) / n
+    ss_tot = float(sum((y - mean_y) ** 2 for y in ys))
+    r2 = 1.0 if ss_tot <= 1e-12 else max(0.0, 1.0 - ss_res / ss_tot)
+    return float(slope), float(intercept), float(r2)
+
+
+def build_trendline(
+    pivots: Sequence[Pivot],
+    all_same_kind: Sequence[Pivot],
+    side: Optional[str] = None,
+    tol: float = 0.0,
+) -> TrendLine:
+    """
+    Fit a line to `pivots` and count how many of `all_same_kind` touch it.
+
+    `side` ("upper"/"lower") switches to a true boundary fit; without it the
+    legacy least-squares behaviour is kept for callers that want a centre line.
+    """
     xs = [p.idx for p in pivots]
     ys = [p.price for p in pivots]
-    slope, intercept, r2 = fit_line(xs, ys)
+    if side:
+        slope, intercept, r2 = fit_boundary(pivots, side, tol)
+    else:
+        slope, intercept, r2 = fit_line(xs, ys)
 
     mean_price = float(np.mean(ys)) if ys else 1.0
     span = max(1, max(xs) - min(xs)) if xs else 1
@@ -380,8 +485,47 @@ def _classify_converging(
     return None
 
 
+def _resolution_state(
+    df: pd.DataFrame,
+    upper: "TrendLine",
+    lower: "TrendLine",
+    x1: int,
+    atr: float,
+    bars: int = 5,
+) -> Tuple[str, float]:
+    """
+    Has price closed decisively outside the pattern's boundaries yet?
+
+    Looks at CLOSES, not wicks: a wick through a boundary is a test, a close
+    beyond it is a break. Only the final `bars` are considered — an excursion in
+    the middle of the pattern would have invalidated the fit, not resolved it.
+
+    Returns (state, distance_in_atr).
+    """
+    if atr <= 0 or len(df) == 0:
+        return "pending", 0.0
+
+    tol = BOUNDARY_TOL_ATR * atr
+    start = max(0, min(x1, len(df) - 1) - bars + 1)
+    best_state, best_gap = "pending", 0.0
+
+    for i in range(start, min(x1, len(df) - 1) + 1):
+        close = float(df["Close"].iloc[i])
+        up_gap = close - (upper.value_at(i) + tol)
+        dn_gap = (lower.value_at(i) - tol) - close
+        if up_gap > 0 and up_gap / atr > best_gap:
+            best_state, best_gap = "broke_up", up_gap / atr
+        elif dn_gap > 0 and dn_gap / atr > best_gap:
+            best_state, best_gap = "broke_down", dn_gap / atr
+
+    return best_state, round(best_gap, 2)
+
+
 def _detect_converging(
-    df: pd.DataFrame, pivots: List[Pivot], window: Tuple[int, int]
+    df: pd.DataFrame,
+    pivots: List[Pivot],
+    window: Tuple[int, int],
+    atr: float = 0.0,
 ) -> Optional[Pattern]:
     """Fit both boundaries over `window` and classify triangles / wedges."""
     x0, x1 = window
@@ -390,8 +534,12 @@ def _detect_converging(
     if len(highs) < 2 or len(lows) < 2:
         return None
 
-    upper = build_trendline(highs, highs)
-    lower = build_trendline(lows, lows)
+    # Boundary fits, not regressions: the upper line must cap the highs and the
+    # lower line floor the lows, otherwise the breakout level sits at a price
+    # the stock has already traded through.
+    tol = BOUNDARY_TOL_ATR * atr if atr > 0 else 0.0
+    upper = build_trendline(highs, highs, side="upper", tol=tol)
+    lower = build_trendline(lows, lows, side="lower", tol=tol)
 
     width_start = upper.value_at(x0) - lower.value_at(x0)
     width_end = upper.value_at(x1) - lower.value_at(x1)
@@ -447,6 +595,8 @@ def _detect_converging(
     if draw_end <= draw_start:
         return None
 
+    resolution, resolution_atr = _resolution_state(df, upper, lower, draw_end, atr)
+
     return Pattern(
         pattern_type=name,
         quality_score=round(score, 4),
@@ -463,6 +613,8 @@ def _detect_converging(
         end_idx=draw_end,
         volume_confirmed=bool(vol["declining"]),
         score_breakdown={k: round(v, 4) for k, v in parts.items()},
+        resolution=resolution,
+        resolution_atr=resolution_atr,
     )
 
 
@@ -548,8 +700,9 @@ def _detect_flag_pennant(
             if len(highs) < 2 or len(lows) < 2:
                 continue
 
-            upper = build_trendline(highs, highs)
-            lower = build_trendline(lows, lows)
+            tol = BOUNDARY_TOL_ATR * atr if atr > 0 else 0.0
+            upper = build_trendline(highs, highs, side="upper", tol=tol)
+            lower = build_trendline(lows, lows, side="lower", tol=tol)
 
             w0 = upper.value_at(c0) - lower.value_at(c0)
             w1 = upper.value_at(c1) - lower.value_at(c1)
@@ -921,7 +1074,7 @@ def detect_patterns(
         x0 = x1 - span
         if x0 < 0:
             continue
-        p = _detect_converging(df, pivots, (x0, x1))
+        p = _detect_converging(df, pivots, (x0, x1), atr=atr)
         if p is not None:
             found.append(p)
 

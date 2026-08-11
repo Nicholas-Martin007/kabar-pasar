@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from ta.momentum import RSIIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import EMAIndicator
 from ta.volatility import AverageTrueRange
 
@@ -19,6 +19,19 @@ EMA_FAST = 20
 EMA_SLOW = 50
 RSI_WINDOW = 14
 ATR_WINDOW = 14
+
+# Stochastic (14, 3, 3) — the standard settings. %K is where the close sits
+# within the recent high-low range; %D is its 3-period smoothing.
+#
+# It answers a different question from RSI, which is why both are worth having:
+# RSI measures the SIZE of recent gains against recent losses, stochastic
+# measures WHERE in its range price closed. A stock can grind up on small daily
+# gains (mild RSI) while closing at the top of its range every day (pinned
+# stochastic), and the reverse.
+STOCH_WINDOW = 14
+STOCH_SMOOTH = 3
+STOCH_OVERBOUGHT = 80
+STOCH_OVERSOLD = 20
 
 # Bars on each side required for a swing pivot. 3 keeps minor structure without
 # drowning the chart in noise.
@@ -41,7 +54,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     silently emitting an all-NaN EMA50 would produce a chart that looks fine but
     has no trend line on it.
     """
-    required = max(EMA_SLOW, RSI_WINDOW, ATR_WINDOW) + 1
+    required = max(EMA_SLOW, RSI_WINDOW, ATR_WINDOW, STOCH_WINDOW) + 1
     if len(df) < required:
         raise ValueError(
             f"need >= {required} bars for EMA{EMA_SLOW}/RSI{RSI_WINDOW}/ATR{ATR_WINDOW}, got {len(df)}"
@@ -56,6 +69,12 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["atr14"] = AverageTrueRange(
         high, low, close, window=ATR_WINDOW
     ).average_true_range()
+
+    stoch = StochasticOscillator(
+        high, low, close, window=STOCH_WINDOW, smooth_window=STOCH_SMOOTH
+    )
+    out["stoch_k"] = stoch.stoch()
+    out["stoch_d"] = stoch.stoch_signal()
 
     # `ta` is inconsistent about warm-up: RSIIndicator yields NaN for its first
     # window-1 bars, but AverageTrueRange yields 0.0. A literal 0 ATR is not

@@ -54,6 +54,39 @@ def _trend_phrase(close: float, ema20: float, ema50: float) -> str:
 _STRENGTH_ICON = {"KUAT": "🟩", "SEDANG": "🟨", "LEMAH": "⬜"}
 
 
+def _stoch_lines(result: "ChartResult") -> List[str]:
+    """
+    Stochastic reading, with the %K/%D relationship spelled out.
+
+    Deliberately says what it measures. Read as "overbought = sell" it is
+    actively harmful: in a strong trend stochastic pins above 80 for weeks and
+    every reading is a losing short. It describes position within the recent
+    range, nothing more.
+    """
+    k, d = result.stoch_k, result.stoch_d
+    if k is None or d is None:
+        return []
+
+    if k >= 80:
+        state = "di zona jenuh beli (overbought)"
+    elif k <= 20:
+        state = "di zona jenuh jual (oversold)"
+    else:
+        state = "di tengah rentang"
+
+    cross = "%K di atas %D — momentum jangka pendek naik" if k > d else (
+        "%K di bawah %D — momentum jangka pendek turun"
+    )
+    lines = [f"• Stochastic %K {k:.0f} / %D {d:.0f} — {state}; {cross}"]
+    if k >= 80 or k <= 20:
+        lines.append(
+            "  <i>Catatan: dalam tren kuat, stochastic bisa menempel di zona "
+            "jenuh berminggu-minggu. Ini ukuran posisi harga dalam rentangnya, "
+            "bukan aba-aba beli/jual.</i>"
+        )
+    return lines
+
+
 def _zone_lines(
     icon: str,
     name: str,
@@ -96,6 +129,7 @@ def build_rationale(result: "ChartResult") -> str:
         f"Harga terakhir: <b>{format_price(result.last_close, cur)} {cur}</b>",
         f"• {_trend_phrase(result.last_close, result.ema20, result.ema50)}",
         f"• {_rsi_phrase(result.rsi)}",
+        *_stoch_lines(result),
         f"• ATR(14) {format_price(result.atr, cur)} — ukuran volatilitas harian",
         "",
         _DIV,
@@ -141,7 +175,38 @@ def build_rationale(result: "ChartResult") -> str:
                 f"❌ <b>Batal kalau:</b> {guide['invalid']}",
             ]
 
-        if result.pattern_breakout is not None and result.pattern_target is not None:
+        # Status FIRST, then the projection — and only if the projection still
+        # stands. Printing "BELUM terjadi" under a pattern price has already
+        # broken out of, the wrong way, is the single most misleading thing this
+        # message could say.
+        res = result.pattern_resolution
+        gap = result.pattern_resolution_atr
+        if result.pattern_invalidated:
+            way = "ATAS" if res == "broke_up" else "BAWAH"
+            lines += [
+                "",
+                f"🚫 <b>Pola ini sudah BATAL.</b> Harga menembus ke {way} batas "
+                f"pola sejauh {gap:.1f}× ATR, berlawanan dengan arah polanya.",
+                "<i>Target measured move dari pola ini sudah tidak berlaku dan "
+                "tidak ditampilkan. Level TP/SL di bawah dihitung dari ATR dan "
+                "struktur support/resistance — bukan dari pola ini — jadi tetap "
+                "berlaku. Pola tetap ditampilkan supaya kamu bisa melihat apa "
+                "yang gagal.</i>",
+            ]
+        elif res in ("broke_up", "broke_down"):
+            way = "atas" if res == "broke_up" else "bawah"
+            lines += [
+                "",
+                f"⚡ <b>Sudah tembus.</b> Harga menembus batas {way} pola "
+                f"({gap:.1f}× ATR) — pola sudah aktif, bukan lagi menunggu.",
+            ]
+            if result.pattern_target is not None:
+                lines.append(
+                    f"📐 Measured move mengarah ke "
+                    f"<b>{format_price(result.pattern_target, cur)}</b> "
+                    f"(target, bukan kepastian)."
+                )
+        elif result.pattern_breakout is not None and result.pattern_target is not None:
             lines += [
                 "",
                 f"📐 <b>Proyeksi (BELUM terjadi):</b> kalau tembus "

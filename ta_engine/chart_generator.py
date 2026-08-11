@@ -46,6 +46,10 @@ from .indicators import (  # noqa: E402
     EMA_FAST,
     EMA_SLOW,
     RSI_WINDOW,
+    STOCH_OVERBOUGHT,
+    STOCH_OVERSOLD,
+    STOCH_SMOOTH,
+    STOCH_WINDOW,
     add_indicators,
 )
 from .support_resistance import (  # noqa: E402
@@ -81,6 +85,22 @@ _PATTERN_NEUTRAL_COLOR = "#A78BFA"
 # Band opacity by zone strength — the reader should see which level is solid
 # before reading a single label.
 _ZONE_ALPHA = {"strong": 0.20, "medium": 0.12, "weak": 0.06}
+
+# Switch the price axis to log when the window's high/low ratio exceeds this.
+#
+# Not cosmetic. ASPR ran 99 -> 620 -> 156 in five months; on a linear axis the
+# entire recent range collapses into the bottom sixth of the panel and the part
+# a reader actually needs is an unreadable smear. On log, equal vertical
+# distance means equal PERCENTAGE move, which is what a trader is judging
+# anyway. TradingView defaults to log on charts like this for the same reason.
+_LOG_SCALE_RATIO = 3.0
+
+# Roughly how many price labels to put on the axis. The old chart had seven on
+# a 6x range, so ~500 rupiah of price sat between adjacent labels and nothing
+# could be read off it.
+_PRICE_TICKS = 14
+# 1-2-5 progression, the standard "nice number" ladder for axis ticks.
+_NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
 # Blank bars appended to the right of the plot. Without this the newest candles
 # and the TP/SL labels are jammed against the y-axis tick labels and the price
@@ -226,6 +246,21 @@ class ChartResult:
     fundamentals: Optional[Dict[str, Any]] = None
     fundamentals_summary: Optional[str] = None
 
+    # ── Pattern resolution ───────────────────────────────────────────────────
+    # "pending" | "broke_up" | "broke_down", and how far past the boundary in
+    # ATR. `pattern_invalidated` is True when the break went AGAINST the
+    # pattern's own thesis, which retires the projection rather than qualifying
+    # it — see pattern_invalidated().
+    pattern_resolution: str = "pending"
+    pattern_resolution_atr: float = 0.0
+    pattern_invalidated: bool = False
+
+    # ── Stochastic (14,3,3) ──────────────────────────────────────────────────
+    # Where price closed within its recent range, unlike RSI which measures the
+    # size of recent gains against losses.
+    stoch_k: Optional[float] = None
+    stoch_d: Optional[float] = None
+
     # ── Scored S/R zones ─────────────────────────────────────────────────────
     # Support is a band, not a price, and bands differ in how much they have
     # earned their line. `strength` is KUAT / SEDANG / LEMAH — a summary of
@@ -246,6 +281,79 @@ class ChartResult:
         # for the existing API/Telegram callers.
         d["stop_loss"] = d.get("sl")
         return d
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    """Round a pandas scalar for the payload, or None when it is NaN/absent."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, 2) if math.isfinite(f) else None
+
+
+def pattern_invalidated(pattern: Optional[Pattern]) -> bool:
+    """
+    True when price has already broken the OPPOSITE way to the pattern's thesis.
+
+    A Rising Wedge is bearish only if it breaks down; ICBP closed 1.9 ATR above
+    its own upper boundary while the engine was still framing a short and
+    projecting a downside target. A pattern price has refuted must not steer the
+    trade direction, the sentiment badge, or the projection.
+    """
+    if pattern is None:
+        return False
+    res = getattr(pattern, "resolution", "pending")
+    return (
+        (pattern.direction == "bearish" and res == "broke_up")
+        or (pattern.direction == "bullish" and res == "broke_down")
+    )
+
+
+def _nice_ticks(lo: float, hi: float, target: int = _PRICE_TICKS) -> List[float]:
+    """
+    Round tick values across [lo, hi], on a 1-2-2.5-5 ladder.
+
+    Matplotlib's default locator gives about seven ticks and rounds hard to
+    powers of ten, which on a 100-600 range means 100/200/.../600 — useless for
+    reading a level off the axis.
+    """
+    span = hi - lo
+    if span <= 0 or not math.isfinite(span):
+        return []
+    raw = span / max(target, 2)
+    mag = 10 ** math.floor(math.log10(raw))
+    step = next((s * mag for s in _NICE_STEPS if s * mag >= raw), 10 * mag)
+    start = math.floor(lo / step) * step
+    out, v = [], start
+    while v <= hi + step * 0.5:
+        if lo <= v <= hi:
+            out.append(round(v, 6))
+        v += step
+    return out
+
+
+def _log_ticks(lo: float, hi: float, target: int = _PRICE_TICKS) -> List[float]:
+    """
+    Geometrically spaced ticks, snapped to readable numbers.
+
+    Steps by a constant RATIO rather than a constant amount, so the labels come
+    out like TradingView's 80 / 89 / 99 / 111 / 123 / 136 — even spacing on
+    screen, even percentage steps in price.
+    """
+    if lo <= 0 or hi <= lo:
+        return []
+    ratio = (hi / lo) ** (1.0 / max(target, 2))
+    out: List[float] = []
+    v = lo
+    while v <= hi:
+        # Two significant figures reads as a price; more reads as noise.
+        mag = 10 ** math.floor(math.log10(v))
+        snapped = round(v / (mag / 10)) * (mag / 10) if v >= 10 else round(v, 1)
+        if not out or snapped > out[-1]:
+            out.append(snapped)
+        v *= ratio
+    return [t for t in out if lo <= t <= hi]
 
 
 def _zone_dict(zone: Optional[Zone], ticker: str) -> Optional[Dict[str, Any]]:
@@ -519,6 +627,29 @@ def _render_chart(
         mpf.make_addplot(plot_df["ema50"], color="#F5A623", width=1.1),
     ]
 
+    # Stochastic in its own panel (2), below volume (1). Answers a different
+    # question from RSI — where in its range price closed, not how big the
+    # recent moves were — so the two together say more than either alone.
+    has_stoch = {"stoch_k", "stoch_d"}.issubset(plot_df.columns) and (
+        plot_df["stoch_k"].notna().any()
+    )
+    if has_stoch:
+        band_hi = pd.Series(STOCH_OVERBOUGHT, index=plot_df.index)
+        band_lo = pd.Series(STOCH_OVERSOLD, index=plot_df.index)
+        # secondary_y=False is required, not stylistic: left to "auto",
+        # mplfinance routes these to the panel's SECONDARY axis and the primary
+        # one keeps an unrelated auto-range, so the panel renders 0-100 data
+        # against a left axis labelled 76-84.
+        stoch_kw = dict(panel=2, secondary_y=False)
+        addplots += [
+            mpf.make_addplot(band_hi, color="#F43F5E", width=0.7,
+                             linestyle="--", ylabel="Stoch", **stoch_kw),
+            mpf.make_addplot(band_lo, color="#22C55E", width=0.7,
+                             linestyle="--", **stoch_kw),
+            mpf.make_addplot(plot_df["stoch_k"], color="#22D3EE", width=1.3, **stoch_kw),
+            mpf.make_addplot(plot_df["stoch_d"], color="#F5A623", width=1.0, **stoch_kw),
+        ]
+
     # An index has no tradeable TP/SL, so only structural levels are drawn.
     show_trade = not is_index_symbol(ticker)
     green = [levels["tp1"], levels["tp2"]] if show_trade else []
@@ -563,6 +694,9 @@ def _render_chart(
             if alines is not None:
                 plot_kwargs["alines"] = alines
 
+            if has_stoch:
+                plot_kwargs["panel_ratios"] = (6, 2, 2)
+
             fig, axes = mpf.plot(
                 plot_df,
                 type="candle",
@@ -570,7 +704,8 @@ def _render_chart(
                 addplot=addplots,
                 hlines=hlines,
                 volume=True,
-                figsize=(12, 7),
+                volume_panel=1,
+                figsize=(12, 8.5 if has_stoch else 7),
                 title=title,
                 ylabel="Harga",
                 ylabel_lower="Volume",
@@ -638,6 +773,56 @@ def _render_chart(
             cur = "IDR" if is_idx_symbol(ticker) else "USD"
             fmt = lambda v: format_price(v, cur)  # noqa: E731
 
+            # ── Price axis: log when the range demands it, dense ticks always ──
+            #
+            # Applied AFTER set_ylim so the ticks span the final limits. On a
+            # name that ran 99 -> 620 -> 156 a linear axis buries five months of
+            # price in the bottom sixth of the panel; on log, equal height means
+            # equal percentage move, which is what is actually being judged.
+            y_lo, y_hi = ax.get_ylim()
+            use_log = y_lo > 0 and (y_hi / y_lo) >= _LOG_SCALE_RATIO
+            if use_log:
+                ax.set_yscale("log")
+                ax.set_ylim(y_lo, y_hi)
+                ticks = _log_ticks(y_lo, y_hi)
+            else:
+                ticks = _nice_ticks(y_lo, y_hi)
+
+            if ticks:
+                # Drop ticks hugging the panel edges: their labels straddle the
+                # frame and collide with the panel below (the bottom price label
+                # was landing on top of the volume axis).
+                edge = (y_hi - y_lo) * 0.015
+                ticks = [t for t in ticks if y_lo + edge < t < y_hi - edge]
+            if ticks:
+                ax.set_yticks(ticks)
+                ax.set_yticklabels([fmt(t) for t in ticks], fontsize=8)
+            # Log scale otherwise litters the axis with unlabelled minor ticks.
+            ax.minorticks_off()
+            ax.grid(True, axis="y", color="#1E2D40", linewidth=0.5, alpha=0.55)
+            ax.grid(True, axis="x", color="#1E2D40", linewidth=0.4, alpha=0.35)
+            ax.set_axisbelow(True)
+
+            # Pin the stochastic panel to its real 0-100 range and label the
+            # levels that carry meaning, rather than whatever the data happened
+            # to span. Its axis is the last one mplfinance created.
+            if has_stoch and len(axes) >= 5:
+                sax = axes[4]
+                sax.set_ylim(0, 100)
+                sax.set_yticks([0, STOCH_OVERSOLD, 50, STOCH_OVERBOUGHT, 100])
+                sax.set_yticklabels(["0", str(STOCH_OVERSOLD), "50",
+                                     str(STOCH_OVERBOUGHT), "100"], fontsize=8)
+                sax.grid(True, axis="y", color="#1E2D40", linewidth=0.4, alpha=0.45)
+                sax.set_axisbelow(True)
+
+            # Same edge-collision fix for volume: its top label was printing
+            # over the price panel's frame.
+            if len(axes) >= 3:
+                vax = axes[2]
+                v_lo, v_hi = vax.get_ylim()
+                vax.set_yticks([t for t in vax.get_yticks()
+                                if v_lo < t < v_hi - (v_hi - v_lo) * 0.06])
+
             # Shade the accumulation zone. A band reads as "anywhere in
             # here", which is what an entry range means — a single line would
             # imply a precision the zone deliberately does not have.
@@ -648,6 +833,34 @@ def _render_chart(
                     pad = max((y_hi - y_lo) * 0.004, 1e-9)
                     lo, hi = lo - pad, hi + pad
                 ax.axhspan(lo, hi, color="#22C55E", alpha=0.13, zorder=0)
+
+            # ── Risk / reward box, projected into the right margin ───────────
+            #
+            # Reward band from entry up to TP1, risk band from entry down to SL
+            # (mirrored in a breakdown frame). Drawn only over the blank margin
+            # so it never sits on top of price history: these are prospective
+            # levels, and shading them across past candles would read as though
+            # the trade had already been taken there.
+            if show_trade and levels.get("sl") and levels.get("tp1"):
+                entry_px = float(plot_df["Close"].iloc[-1])
+                box_lo, box_hi = ax.get_xlim()
+                box_start = box_hi - _RIGHT_MARGIN_BARS
+                short = levels.get("direction") == "short"
+                reward_c = "#F43F5E" if short else "#22C55E"
+                risk_c = "#22C55E" if short else "#F43F5E"
+                for y0, y1, color in (
+                    (entry_px, levels["tp1"], reward_c),
+                    (entry_px, levels["sl"], risk_c),
+                ):
+                    ax.fill_between(
+                        [box_start, box_hi],
+                        min(y0, y1), max(y0, y1),
+                        color=color, alpha=0.16, linewidth=0, zorder=0,
+                    )
+                ax.plot(
+                    [box_start, box_hi], [entry_px, entry_px],
+                    color="#94A3B8", linewidth=0.9, linestyle=":", zorder=1,
+                )
 
             annotations = []
             if show_trade:
@@ -805,7 +1018,13 @@ def _render_chart(
             # solid part is price that happened, the dotted part is arithmetic
             # about price that has NOT happened. A single line style for both
             # would present a projection as though it were history.
-            if patterns and show_trade:
+            #
+            # A refuted pattern keeps its boundaries drawn — the reader should
+            # see the shape that failed — but loses its forward projection and
+            # measured-move label. Leaving "proyeksi 6,519" on a wedge price has
+            # already broken UPWARD out of would put the chart in direct
+            # contradiction with the caption beside it.
+            if patterns and show_trade and not pattern_invalidated(patterns[0]):
                 best_p = patterns[0]
                 pos_of = {d: i for i, d in enumerate(plot_df.index)}
                 n_vis = len(plot_df)
@@ -932,7 +1151,14 @@ def _analyse_timeframe(
     # contradiction — the badge says price should fall while the numbers
     # describe a buy, and a reader can act on either.
     patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
-    frame = "short" if (patterns and patterns[0].direction == "bearish") else "long"
+    best = patterns[0] if patterns else None
+    # An invalidated pattern still gets drawn and explained — the reader should
+    # see what failed — but it no longer sets the trade frame.
+    frame = (
+        "short"
+        if (best and best.direction == "bearish" and not pattern_invalidated(best))
+        else "long"
+    )
     trade = _compute_trade_levels(
         entry, atr, zones, ticker=symbol, direction=frame
     )
@@ -1038,7 +1264,12 @@ def generate_chart(
     out_path = Path(out_dir) / f"{safe}_{suffix}.png"
 
     best = patterns[0] if patterns else None
-    sentiment = _sentiment_for(best.direction if best else None)
+    # A refuted pattern reads NEUTRAL: keeping "WARNING / BEARISH" on a wedge
+    # price has already broken upward out of would contradict the levels below it.
+    sentiment = (
+        "NEUTRAL" if pattern_invalidated(best)
+        else _sentiment_for(best.direction if best else None)
+    )
     is_index = is_index_symbol(symbol)
     # Volume spikes are found here; the headlines that explain them are
     # attached downstream where the news cache is reachable.
@@ -1135,6 +1366,11 @@ def generate_chart(
         pattern_name=best.pattern_type if best else None,
         sentiment=sentiment,
         quality_score=best.quality_score if best else 0.0,
+        pattern_resolution=getattr(best, "resolution", "pending") if best else "pending",
+        pattern_resolution_atr=getattr(best, "resolution_atr", 0.0) if best else 0.0,
+        pattern_invalidated=pattern_invalidated(best),
+        stoch_k=_safe_float(last.get("stoch_k")),
+        stoch_d=_safe_float(last.get("stoch_d")),
         trade_direction="none" if is_index else trade.get("direction", "long"),
         pattern_target=round_level(pattern_levels.get("target"), symbol),
         pattern_breakout=round_level(pattern_levels.get("breakout_level"), symbol),
