@@ -104,12 +104,73 @@ _PRICE_TICKS = 14
 # 1-2-5 progression, the standard "nice number" ladder for axis ticks.
 _NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
-# Blank bars appended to the right of the plot. Without this the newest candles
-# and the TP/SL labels are jammed against the y-axis tick labels and the price
-# projections have nowhere to sit. Sized so the longest label
-# ("Resistance 10,200") clears the last candle with visible whitespace either
-# side rather than merely not overlapping it.
-_RIGHT_MARGIN_BARS = 22
+# Blank bars appended to the right of the plot, as a FLOOR. The real width is
+# computed per chart from the longest label actually being drawn — see
+# _margin_bars_for().
+#
+# A fixed 22 was fine when labels read "Resistance 10,200". They now read
+# "Resistance 6,325 · KUAT" and "BELI 6,200-6,275", and a POC label joined
+# them, so right-aligned text started reaching back over the newest candles —
+# the price action is the thing the reader came for, and it was the thing
+# getting covered.
+_MIN_RIGHT_MARGIN_BARS = 30
+# Rough width of one 8pt bold character, in points. Only needs to be close:
+# it sizes whitespace, and the floor plus the cap keep it sane either way.
+_LABEL_CHAR_PT = 6.1
+# Padding around a label box (bbox pad + the offset it is drawn at), in points.
+_LABEL_PAD_PT = 42.0
+# Never let the gutter eat more than this share of the plot, however long a
+# label gets — the candles must stay the majority of the picture.
+_MAX_MARGIN_FRACTION = 0.30
+
+
+def _fit_axes(fig, axes, rect=(0.062, 0.105, 0.988, 0.928)) -> None:
+    """
+    Rescale every panel to fill `rect` (left, bottom, right, top) of the figure.
+
+    subplots_adjust does nothing here: mplfinance builds its panels with
+    fig.add_axes() at fixed rectangles, not as a subplot grid, so the usual
+    layout call is silently ignored and the chart renders squeezed into the
+    middle with dark bands on all four sides.
+
+    Maps the panels' combined bounding box onto the target rect, which
+    preserves the panel height ratios and the gaps between them while
+    reclaiming the wasted margin.
+    """
+    boxes = [a.get_position() for a in axes]
+    x0 = min(b.x0 for b in boxes)
+    x1 = max(b.x1 for b in boxes)
+    y0 = min(b.y0 for b in boxes)
+    y1 = max(b.y1 for b in boxes)
+    left, bottom, right, top = rect
+    sx = (right - left) / max(x1 - x0, 1e-9)
+    sy = (top - bottom) / max(y1 - y0, 1e-9)
+    for ax_, b in zip(axes, boxes):
+        ax_.set_position([
+            left + (b.x0 - x0) * sx,
+            bottom + (b.y0 - y0) * sy,
+            b.width * sx,
+            b.height * sy,
+        ])
+
+
+def _margin_bars_for(labels: List[str], visible_bars: int, fig_width_in: float) -> int:
+    """
+    Blank bars needed on the right so the longest label sits clear of the data.
+
+    Converts the label's rendered width into bar units: text width is fixed in
+    points, so the number of bars it spans depends on how many bars are on
+    screen and how wide the figure is.
+    """
+    if not labels:
+        return _MIN_RIGHT_MARGIN_BARS
+    longest = max(len(t) for t in labels)
+    needed_pt = longest * _LABEL_CHAR_PT + _LABEL_PAD_PT
+    # Plot area is roughly 85% of the figure; 72 points to the inch.
+    plot_pt = fig_width_in * 0.85 * 72.0
+    bars = needed_pt / max(plot_pt / max(visible_bars, 1), 1e-6)
+    cap = visible_bars * _MAX_MARGIN_FRACTION / (1 - _MAX_MARGIN_FRACTION)
+    return int(max(_MIN_RIGHT_MARGIN_BARS, min(bars, cap)))
 
 # Sentiment palette for the corner badge.
 _SENTIMENT_STYLE = {
@@ -713,9 +774,38 @@ def _render_chart(
     last = df.iloc[-1]
     tf_label = {"1d": "Daily", "4h": "4-Hour", "1h": "1-Hour"}.get(timeframe, timeframe)
     title = (
-        f"\n{ticker} — {tf_label}   "
+        f"{ticker} — {tf_label}   "
         f"RSI({RSI_WINDOW}) {last['rsi14']:.1f}   ATR({ATR_WINDOW}) {last['atr14']:.2f}"
     )
+
+    # Size the right gutter from the labels that will actually be drawn, before
+    # anything is plotted — the R/R box, the pattern projections and the label
+    # column all have to agree on where the blank area starts.
+    _cur = "IDR" if is_idx_symbol(ticker) else "USD"
+    _f = lambda v: format_price(v, _cur)  # noqa: E731
+    label_texts: List[str] = []
+    if show_trade:
+        label_texts += [
+            f"TP2 {_f(levels['tp2'])}",
+            f"TP1 {_f(levels['tp1'])}",
+            f"SL {_f(levels['sl'])}",
+        ]
+        plan0 = entry_plan or {}
+        if plan0.get("entry_low") and plan0.get("entry_high"):
+            label_texts.append(
+                f"BELI {_f(plan0['entry_low'])}–{_f(plan0['entry_high'])}"
+            )
+        if plan0.get("breakout_trigger"):
+            label_texts.append(f"Breakout {_f(plan0['breakout_trigger'])}")
+    if support is not None:
+        label_texts.append(f"Support {_f(support.high)} · {support.label}")
+    if resistance is not None:
+        label_texts.append(f"Resistance {_f(resistance.low)} · {resistance.label}")
+    if profile is not None and not profile.is_wide:
+        label_texts.append(f"POC {_f(profile.poc)}")
+
+    fig_w = 13.5
+    margin_bars = _margin_bars_for(label_texts, len(plot_df), fig_w)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -736,23 +826,34 @@ def _render_chart(
                 hlines=hlines,
                 volume=True,
                 volume_panel=1,
-                figsize=(12, 8.5 if has_stoch else 7),
-                title=title,
+                figsize=(fig_w, 9.0 if has_stoch else 7.4),
+                title="",
                 ylabel="Harga",
                 ylabel_lower="Volume",
                 **plot_kwargs,
                 returnfig=True,
-                tight_layout=True,
+                tight_layout=False,
             )
 
             ax = axes[0]
+
+            # Title ABOVE the axes, not inside them. mplfinance draws its own
+            # title over the plot area, so on a chart whose recent candles sit
+            # high it printed straight across the price action.
+            ax.set_title(
+                title, loc="left", pad=14, fontsize=13,
+                color="#E6EDF7", weight="bold",
+            )
+            # tight_layout has already run by this point and sized the figure
+            # for a title that did not exist, so the new one lands outside the
+            # canvas and gets clipped. Reclaim the strip explicitly.
 
             # Right margin. mplfinance places candles at integer x positions, so
             # widening xlim adds blank space without touching the data — the
             # newest candles and every right-aligned price label stop colliding
             # with the y-axis ticks, and projected TP lines have somewhere to run.
             x_lo, x_hi = ax.get_xlim()
-            ax.set_xlim(x_lo, x_hi + _RIGHT_MARGIN_BARS)
+            ax.set_xlim(x_lo, x_hi + margin_bars)
 
             # Support / resistance bands, drawn before anything else so candles
             # and level labels sit on top of them.
@@ -875,7 +976,7 @@ def _render_chart(
             if show_trade and levels.get("sl") and levels.get("tp1"):
                 entry_px = float(plot_df["Close"].iloc[-1])
                 box_lo, box_hi = ax.get_xlim()
-                box_start = box_hi - _RIGHT_MARGIN_BARS
+                box_start = box_hi - margin_bars
                 short = levels.get("direction") == "short"
                 reward_c = "#F43F5E" if short else "#22C55E"
                 risk_c = "#22C55E" if short else "#F43F5E"
@@ -1097,7 +1198,7 @@ def _render_chart(
                     if x1 <= x0:
                         continue
                     slope = (y1 - y0) / (x1 - x0)
-                    x_end = n_vis - 1 + _RIGHT_MARGIN_BARS
+                    x_end = n_vis - 1 + margin_bars
                     ax.plot(
                         [x1, x_end], [y1, y1 + slope * (x_end - x1)],
                         color=proj_color, linestyle=":", linewidth=1.2,
@@ -1107,7 +1208,7 @@ def _render_chart(
                 target = (best_p.key_levels or {}).get("target")
                 if target is not None:
                     lo_y, hi_y = ax.get_ylim()
-                    x_lab = n_vis - 1 + _RIGHT_MARGIN_BARS * 0.5
+                    x_lab = n_vis - 1 + margin_bars * 0.5
                     if target > hi_y:
                         # Measured move sits above the visible range. Pin the
                         # label to the top edge with an arrow rather than
@@ -1158,6 +1259,9 @@ def _render_chart(
                 fontsize=6.5, color="#6F80A2", ha="left", va="bottom",
             )
 
+            # Layout LAST, immediately before the render, and by moving the
+            # axes rather than via subplots_adjust — see _fit_axes.
+            _fit_axes(fig, axes)
             fig.savefig(out_path, dpi=130, facecolor=fig.get_facecolor())
         finally:
             # Always close, even if savefig raised — a leaked figure keeps its
