@@ -185,7 +185,7 @@ async def send_photo(
     return True
 
 
-async def send_chart(chat_id: str, ticker: str) -> bool:
+async def send_chart(chat_id: str, ticker: str, theme: Optional[str] = None) -> bool:
     """
     Generate the TA chart for `ticker` and deliver rationale + PNG.
 
@@ -196,7 +196,7 @@ async def send_chart(chat_id: str, ticker: str) -> bool:
     from backend.services.chart_service import get_chart_with_rationale
 
     try:
-        result, rationale = await get_chart_with_rationale(ticker)
+        result, rationale = await get_chart_with_rationale(ticker, theme=theme)
     except ValueError as exc:
         await send_message(chat_id, f"⚠️ {html.escape(str(exc))}")
         return False
@@ -638,8 +638,15 @@ async def _handle_command(chat_id: str, text: str) -> None:
         from ta_engine.price_utils import resolve_symbol
 
         symbol = resolve_symbol(arg)
+        # "/chart BBCA terang" for the light variant — a dark chart is hard to
+        # read on a phone outdoors, which is when most people check.
+        theme = None
+        if len(args) > 1 and args[1].lower() in ("terang", "light", "putih"):
+            theme = "light"
+        elif len(args) > 1 and args[1].lower() in ("gelap", "dark"):
+            theme = "dark"
         await send_message(chat_id, f"⏳ Membuat chart {html.escape(symbol)}…")
-        await send_chart(chat_id, symbol)
+        await send_chart(chat_id, symbol, theme=theme)
         return
 
     if cmd in ("msci", "ftse", "indeks"):

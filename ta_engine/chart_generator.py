@@ -24,6 +24,7 @@ disclaimer, not as a signal to buy or sell — see DISCLAIMER below.
 
 import logging
 import math
+import os
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -77,6 +78,44 @@ from .price_utils import (  # noqa: E402
     round_to_idx_tick,
 )
 
+
+# ── Themes ───────────────────────────────────────────────────────────────────
+#
+# A dark chart is unreadable on a phone in daylight, which is exactly the
+# "checking between tasks at work" case this bot is built for. Colours live in
+# one place per theme so a hex value can't drift between the candles and the
+# labels that point at them.
+#
+# Green/red keep their meaning across both themes; the light variant darkens
+# them rather than swapping them, because a light-green candle on white fails
+# contrast badly.
+_PALETTES: Dict[str, Dict[str, str]] = {
+    "dark": {
+        "face": "#0F1521", "fig": "#080C14", "grid": "#1E2D40",
+        "text": "#E6EDF7", "muted": "#6F80A2",
+        "up": "#22C55E", "down": "#F43F5E",
+        "ema_fast": "#3B9ED6", "ema_slow": "#F5A623",
+        "support": "#22C55E", "resistance": "#F43F5E",
+        "profile": "#A78BFA", "neutral": "#94A3B8",
+        "accent": "#22D3EE", "warn": "#F5A623",
+        "label_bg": "#0F1521",
+        "vol_spike": "#FBBF24",
+    },
+    "light": {
+        "face": "#FFFFFF", "fig": "#F4F6FA", "grid": "#D7DEE9",
+        "text": "#0F1521", "muted": "#5A6782",
+        # Deepened so they hold contrast against white.
+        "up": "#15803D", "down": "#BE123C",
+        "ema_fast": "#1D6FA5", "ema_slow": "#B45309",
+        "support": "#15803D", "resistance": "#BE123C",
+        "profile": "#6D28D9", "neutral": "#475569",
+        "accent": "#0E7490", "warn": "#B45309",
+        "label_bg": "#FFFFFF",
+        "vol_spike": "#B45309",
+    },
+}
+DEFAULT_THEME = os.getenv("CHART_THEME", "dark").strip().lower()
+
 # Pattern geometry is drawn in its own palette. Green/red already mean
 # support/TP and resistance/SL on this chart; reusing them for trendlines would
 # read as levels rather than boundaries.
@@ -87,6 +126,14 @@ _PATTERN_NEUTRAL_COLOR = "#A78BFA"
 # Band opacity by zone strength — the reader should see which level is solid
 # before reading a single label.
 _ZONE_ALPHA = {"strong": 0.20, "medium": 0.12, "weak": 0.06}
+
+# Share of the right gutter the volume-profile histogram may occupy. The
+# rest stays clear so the level labels drawn on top remain legible.
+_PROFILE_GUTTER_FRACTION = 0.55
+# A volume bar this many times the rolling average is 'unusual' and gets
+# highlighted. Same constant the narrative uses, so the chart and the text
+# cannot disagree about which day was a spike.
+_VOLUME_SPIKE_MULT = 2.0
 
 # Switch the price axis to log when the window's high/low ratio exceeds this.
 #
@@ -702,6 +749,7 @@ def _render_chart(
     entry_plan: Optional[Dict[str, Any]] = None,
     stop_anchor: Optional[Zone] = None,
     profile: Optional[VolumeProfile] = None,
+    theme: str = "dark",
 ) -> None:
     """
     Candlestick + EMA overlays + green (support/TP) and red (resistance/SL).
@@ -711,12 +759,13 @@ def _render_chart(
     tracks strength, so a KUAT shelf is visibly more solid than a LEMAH one at a
     glance, before any label is read.
     """
+    pal = _PALETTES.get(theme, _PALETTES["dark"])
     plot_df = df.tail(plot_bars)
     patterns = patterns or []
 
     addplots = [
-        mpf.make_addplot(plot_df["ema20"], color="#3B9ED6", width=1.1),
-        mpf.make_addplot(plot_df["ema50"], color="#F5A623", width=1.1),
+        mpf.make_addplot(plot_df["ema20"], color=pal["ema_fast"], width=1.1),
+        mpf.make_addplot(plot_df["ema50"], color=pal["ema_slow"], width=1.1),
     ]
 
     # Stochastic in its own panel (2), below volume (1). Answers a different
@@ -734,12 +783,12 @@ def _render_chart(
         # against a left axis labelled 76-84.
         stoch_kw = dict(panel=2, secondary_y=False)
         addplots += [
-            mpf.make_addplot(band_hi, color="#F43F5E", width=0.7,
+            mpf.make_addplot(band_hi, color=pal["down"], width=0.7,
                              linestyle="--", ylabel="Stoch", **stoch_kw),
-            mpf.make_addplot(band_lo, color="#22C55E", width=0.7,
+            mpf.make_addplot(band_lo, color=pal["up"], width=0.7,
                              linestyle="--", **stoch_kw),
-            mpf.make_addplot(plot_df["stoch_k"], color="#22D3EE", width=1.3, **stoch_kw),
-            mpf.make_addplot(plot_df["stoch_d"], color="#F5A623", width=1.0, **stoch_kw),
+            mpf.make_addplot(plot_df["stoch_k"], color=pal["accent"], width=1.3, **stoch_kw),
+            mpf.make_addplot(plot_df["stoch_d"], color=pal["ema_slow"], width=1.0, **stoch_kw),
         ]
 
     # An index has no tradeable TP/SL, so only structural levels are drawn.
@@ -749,7 +798,7 @@ def _render_chart(
 
     hlines = dict(
         hlines=green + red,
-        colors=["#22C55E"] * len(green) + ["#F43F5E"] * len(red),
+        colors=[pal["up"]] * len(green) + [pal["down"]] * len(red),
         linestyle="--",
         linewidths=1.0,
     )
@@ -761,14 +810,25 @@ def _render_chart(
         else None
     )
 
+    # rc overrides are required, not cosmetic: "nightclouds" hard-codes pale
+    # tick and axis-label colours for a dark background, so the light theme
+    # rendered its price axis, panel titles and date labels in near-white on
+    # white — legible only if you already knew what they said.
     style = mpf.make_mpf_style(
         base_mpf_style="nightclouds",
         marketcolors=mpf.make_marketcolors(
-            up="#22C55E", down="#F43F5E", edge="inherit", wick="inherit", volume="in"
+            up=pal["up"], down=pal["down"], edge="inherit", wick="inherit", volume="in"
         ),
-        facecolor="#0F1521",
-        figcolor="#080C14",
-        gridcolor="#1E2D40",
+        facecolor=pal["face"],
+        figcolor=pal["fig"],
+        gridcolor=pal["grid"],
+        rc={
+            "text.color": pal["text"],
+            "axes.labelcolor": pal["text"],
+            "axes.edgecolor": pal["grid"],
+            "xtick.color": pal["muted"],
+            "ytick.color": pal["muted"],
+        },
     )
 
     last = df.iloc[-1]
@@ -842,7 +902,7 @@ def _render_chart(
             # high it printed straight across the price action.
             ax.set_title(
                 title, loc="left", pad=14, fontsize=13,
-                color="#E6EDF7", weight="bold",
+                color=pal["text"], weight="bold",
             )
             # tight_layout has already run by this point and sized the figure
             # for a title that did not exist, so the new one lands outside the
@@ -862,9 +922,9 @@ def _render_chart(
             # the two: the stop can sit well away from the nearest level, and a
             # SL line floating in empty space gives the reader no way to see
             # what it is resting on.
-            bands = [(support, "#22C55E"), (resistance, "#F43F5E")]
+            bands = [(support, pal["up"]), (resistance, pal["down"])]
             if stop_anchor is not None and stop_anchor not in (support, resistance):
-                bands.append((stop_anchor, "#94A3B8"))
+                bands.append((stop_anchor, pal["neutral"]))
             for zone, color in bands:
                 if zone is None:
                     continue
@@ -928,11 +988,11 @@ def _render_chart(
                 ticks = [t for t in ticks if y_lo + edge < t < y_hi - edge]
             if ticks:
                 ax.set_yticks(ticks)
-                ax.set_yticklabels([fmt(t) for t in ticks], fontsize=8)
+                ax.set_yticklabels([fmt(t) for t in ticks], fontsize=8, color=pal["muted"])
             # Log scale otherwise litters the axis with unlabelled minor ticks.
             ax.minorticks_off()
-            ax.grid(True, axis="y", color="#1E2D40", linewidth=0.5, alpha=0.55)
-            ax.grid(True, axis="x", color="#1E2D40", linewidth=0.4, alpha=0.35)
+            ax.grid(True, axis="y", color=pal["grid"], linewidth=0.5, alpha=0.55)
+            ax.grid(True, axis="x", color=pal["grid"], linewidth=0.4, alpha=0.35)
             ax.set_axisbelow(True)
 
             # Pin the stochastic panel to its real 0-100 range and label the
@@ -942,10 +1002,69 @@ def _render_chart(
                 sax = axes[4]
                 sax.set_ylim(0, 100)
                 sax.set_yticks([0, STOCH_OVERSOLD, 50, STOCH_OVERBOUGHT, 100])
-                sax.set_yticklabels(["0", str(STOCH_OVERSOLD), "50",
-                                     str(STOCH_OVERBOUGHT), "100"], fontsize=8)
-                sax.grid(True, axis="y", color="#1E2D40", linewidth=0.4, alpha=0.45)
+                sax.set_yticklabels(
+                    ["0", str(STOCH_OVERSOLD), "50", str(STOCH_OVERBOUGHT), "100"],
+                    fontsize=8, color=pal["muted"],
+                )
+                sax.grid(True, axis="y", color=pal["grid"], linewidth=0.4, alpha=0.45)
                 sax.set_axisbelow(True)
+
+
+            # ── Volume profile histogram, in the right gutter ────────────────
+            #
+            # The horizontal bars TradingView draws down the right edge: bar
+            # length is volume traded at that price. The POC line already
+            # marks the peak, but the SHAPE is the useful part — one fat node
+            # versus volume spread evenly says different things about how much
+            # inventory is sitting at a level.
+            #
+            # Drawn at low zorder inside the margin so the level labels, which
+            # carry opaque backgrounds, stay readable on top of it.
+            if profile is not None and profile.bins:
+                gutter_x0 = len(plot_df) - 1
+                gutter_w = margin_bars * _PROFILE_GUTTER_FRACTION
+                peak = max(v for _c, v in profile.bins) or 1.0
+                for centre, vol in profile.bins:
+                    if vol <= 0:
+                        continue
+                    # Value-area bins read solid; the tails stay faint, so the
+                    # eye lands on where price was actually accepted.
+                    inside = profile.val <= centre <= profile.vah
+                    ax.barh(
+                        y=centre,
+                        width=(vol / peak) * gutter_w,
+                        height=profile.bin_width,
+                        left=gutter_x0,
+                        color=pal["profile"],
+                        alpha=0.34 if inside else 0.14,
+                        edgecolor="none",
+                        zorder=0,
+                    )
+
+
+            # ── Highlight unusual-volume bars ────────────────────────────────
+            #
+            # mplfinance colours volume by up/down day only, so a 4x day looks
+            # identical to an average one and the reader has to read the axis
+            # to notice. Recolour the outliers instead.
+            #
+            # The threshold is the SAME constant the narrative's volume-spike
+            # section uses, so a bar highlighted here is one the text also
+            # calls out — two views of one fact, not two opinions.
+            if len(axes) >= 3 and "Volume" in plot_df.columns:
+                vols = plot_df["Volume"].to_numpy(dtype=float)
+                baseline = pd.Series(vols).rolling(20, min_periods=5).mean()
+                bars = [
+                    b for b in axes[2].patches
+                    if getattr(b, "get_height", None) is not None
+                ]
+                # patches are in bar order when the count lines up; if it does
+                # not (mplfinance internals change), skip rather than mislabel.
+                if len(bars) == len(vols):
+                    for bar, v, base in zip(bars, vols, baseline):
+                        if base and base > 0 and v >= base * _VOLUME_SPIKE_MULT:
+                            bar.set_facecolor(pal["vol_spike"])
+                            bar.set_edgecolor(pal["vol_spike"])
 
             # Same edge-collision fix for volume: its top label was printing
             # over the price panel's frame.
@@ -964,7 +1083,7 @@ def _render_chart(
                 if hi <= lo:            # collapsed zone: give it visible height
                     pad = max((y_hi - y_lo) * 0.004, 1e-9)
                     lo, hi = lo - pad, hi + pad
-                ax.axhspan(lo, hi, color="#22C55E", alpha=0.13, zorder=0)
+                ax.axhspan(lo, hi, color=pal["up"], alpha=0.13, zorder=0)
 
             # ── Risk / reward box, projected into the right margin ───────────
             #
@@ -978,8 +1097,8 @@ def _render_chart(
                 box_lo, box_hi = ax.get_xlim()
                 box_start = box_hi - margin_bars
                 short = levels.get("direction") == "short"
-                reward_c = "#F43F5E" if short else "#22C55E"
-                risk_c = "#22C55E" if short else "#F43F5E"
+                reward_c = pal["down"] if short else pal["up"]
+                risk_c = pal["up"] if short else pal["down"]
                 for y0, y1, color in (
                     (entry_px, levels["tp1"], reward_c),
                     (entry_px, levels["sl"], risk_c),
@@ -991,7 +1110,7 @@ def _render_chart(
                     )
                 ax.plot(
                     [box_start, box_hi], [entry_px, entry_px],
-                    color="#94A3B8", linewidth=0.9, linestyle=":", zorder=1,
+                    color=pal["neutral"], linewidth=0.9, linestyle=":", zorder=1,
                 )
 
             annotations = []
@@ -1000,19 +1119,19 @@ def _render_chart(
                 # breakdown the targets are below and the stop above, so a
                 # fixed green-up/red-down palette would invert the meaning.
                 short = levels.get("direction") == "short"
-                tp_c = "#F43F5E" if short else "#22C55E"
-                sl_c = "#22C55E" if short else "#F43F5E"
+                tp_c = pal["down"] if short else pal["up"]
+                sl_c = pal["up"] if short else pal["down"]
                 if plan.get("entry_low") and plan.get("entry_high"):
                     zl, zh = plan["entry_low"], plan["entry_high"]
                     label = (
                         f"BELI {fmt(zl)}" if zl == zh
                         else f"BELI {fmt(zl)}–{fmt(zh)}"
                     )
-                    annotations.append(((zl + zh) / 2.0, label, "#22C55E"))
+                    annotations.append(((zl + zh) / 2.0, label, pal["up"]))
                 if plan.get("breakout_trigger"):
                     annotations.append(
                         (plan["breakout_trigger"],
-                         f"Breakout {fmt(plan['breakout_trigger'])}", "#22D3EE")
+                         f"Breakout {fmt(plan['breakout_trigger'])}", pal["accent"])
                     )
                 annotations += [
                     (levels["tp2"], f"TP2 {fmt(levels['tp2'])}", tp_c),
@@ -1032,14 +1151,14 @@ def _render_chart(
                 annotations.append((
                     support.high,
                     f"Support {fmt(sup_px)} · {support.label}",
-                    "#22C55E",
+                    pal["up"],
                 ))
             if resistance is not None:
                 res_px = round_level(resistance.low, ticker, direction="floor")
                 annotations.append((
                     resistance.low,
                     f"Resistance {fmt(res_px)} · {resistance.label}",
-                    "#F43F5E",
+                    pal["down"],
                 ))
 
             # ── Volume profile: value area + POC ─────────────────────────────
@@ -1055,15 +1174,15 @@ def _render_chart(
             if profile is not None and not profile.is_wide:
                 ax.axhspan(
                     profile.val, profile.vah,
-                    facecolor="#A78BFA", alpha=0.07, linewidth=0, zorder=0,
+                    facecolor=pal["profile"], alpha=0.07, linewidth=0, zorder=0,
                 )
                 ax.axhline(
-                    profile.poc, color="#A78BFA", linewidth=1.0,
+                    profile.poc, color=pal["profile"], linewidth=1.0,
                     linestyle=(0, (6, 3)), alpha=0.75, zorder=1,
                 )
                 # Label the SAME rounded number the payload and caption use.
                 poc_px = _profile_px(profile.poc, ticker)
-                annotations.append((profile.poc, f"POC {fmt(poc_px)}", "#A78BFA"))
+                annotations.append((profile.poc, f"POC {fmt(poc_px)}", pal["profile"]))
 
 
             # Support / resistance / SL routinely land within a few percent of
@@ -1106,7 +1225,7 @@ def _render_chart(
                     weight="bold",
                     bbox=dict(
                         boxstyle="round,pad=0.34",
-                        facecolor="#0F1521",
+                        facecolor=pal["label_bg"],
                         edgecolor="none",
                         alpha=0.88,
                     ),
@@ -1137,7 +1256,7 @@ def _render_chart(
                 weight="bold",
                 bbox=dict(
                     boxstyle="round,pad=0.38",
-                    facecolor="#0F1521",
+                    facecolor=pal["label_bg"],
                     edgecolor=badge_color,
                     linewidth=1.1,
                     alpha=0.92,
@@ -1162,7 +1281,7 @@ def _render_chart(
                     weight="bold",
                     bbox=dict(
                         boxstyle="round,pad=0.26",
-                        facecolor="#0F1521",
+                        facecolor=pal["label_bg"],
                         edgecolor=color,
                         linewidth=0.6,
                         alpha=0.85,
@@ -1225,7 +1344,7 @@ def _render_chart(
                         xy=(x_lab, y_lab), xycoords="data",
                         ha="center", va="center",
                         fontsize=7.5, color=proj_color, weight="bold",
-                        bbox=dict(boxstyle="round,pad=0.28", facecolor="#0F1521",
+                        bbox=dict(boxstyle="round,pad=0.28", facecolor=pal["label_bg"],
                                   edgecolor=proj_color, linewidth=0.8, alpha=0.92),
                     )
 
@@ -1250,13 +1369,13 @@ def _render_chart(
                         ha="center",
                         va="top",
                         fontsize=7,
-                        color="#F5A623",
+                        color=pal["ema_slow"],
                         annotation_clip=False,
                     )
 
             fig.text(
                 0.01, 0.01, DISCLAIMER,
-                fontsize=6.5, color="#6F80A2", ha="left", va="bottom",
+                fontsize=6.5, color=pal["muted"], ha="left", va="bottom",
             )
 
             # Layout LAST, immediately before the render, and by moving the
@@ -1344,6 +1463,7 @@ def generate_chart(
     plot_bars: int = 120,
     min_pattern_quality: float = MIN_QUALITY,
     multi_timeframe: bool = True,
+    theme: Optional[str] = None,
 ) -> ChartResult:
     """
     Build the TA chart and levels for `ticker`, choosing the better timeframe.
@@ -1410,6 +1530,9 @@ def generate_chart(
             {a.timeframe: round(a.best_score, 3) for a in analyses},
         )
 
+    theme = (theme or DEFAULT_THEME).lower()
+    if theme not in _PALETTES:
+        theme = "dark"
     out_dir = out_dir or _CHART_DIR
     # Symbol goes into a filename — keep it path-safe ("BBCA.JK" -> "BBCA_JK").
     # "^" leads index symbols (^JKSE) and is unsafe in a URL path, so strip it
@@ -1420,6 +1543,8 @@ def generate_chart(
     # sitting in a file called "_daily.png" is a trap for anything that reads
     # the path instead of the payload.
     suffix = "daily" if chosen.timeframe == "1d" else chosen.timeframe
+    if theme != "dark":
+        suffix = f"{suffix}_{theme}"
     out_path = Path(out_dir) / f"{safe}_{suffix}.png"
 
     best = patterns[0] if patterns else None
@@ -1460,6 +1585,7 @@ def generate_chart(
         volume_events=volume_events, entry_plan=plan,
         stop_anchor=None if is_index else trade.get("stop_anchor"),
         profile=profile,
+        theme=theme,
     )
 
     warnings = list(trade["warnings"])

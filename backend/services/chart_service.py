@@ -59,7 +59,9 @@ def _cached(key: str) -> Optional[ChartResult]:
     return None
 
 
-async def get_chart(ticker: str, force: bool = False) -> ChartResult:
+async def get_chart(
+    ticker: str, force: bool = False, theme: Optional[str] = None
+) -> ChartResult:
     """
     Generate (or reuse) the daily TA chart for `ticker`.
 
@@ -67,6 +69,10 @@ async def get_chart(ticker: str, force: bool = False) -> ChartResult:
     maps that to a 404/422.
     """
     key = ticker.strip().upper()
+    # Theme belongs in the cache key, not beside it: keyed on ticker alone,
+    # a light request right after a dark one is served the dark PNG.
+    if theme:
+        key = f"{key}@{theme}"
 
     if not force:
         hit = _cached(key)
@@ -83,7 +89,8 @@ async def get_chart(ticker: str, force: bool = False) -> ChartResult:
                 return hit
 
         started = time.perf_counter()
-        result = await asyncio.to_thread(generate_chart, key)
+        symbol = key.split("@")[0]
+        result = await asyncio.to_thread(generate_chart, symbol, theme=theme)
         elapsed = time.perf_counter() - started
 
         _cache[key] = (time.time(), result)
@@ -168,10 +175,10 @@ async def attach_fundamentals(result: ChartResult, ticker: str) -> ChartResult:
 
 
 async def get_chart_with_rationale(
-    ticker: str, force: bool = False
+    ticker: str, force: bool = False, theme: Optional[str] = None
 ) -> Tuple[ChartResult, str]:
     """Chart plus its plain-language technical summary (HTML, Telegram-ready)."""
-    result = await get_chart(ticker, force=force)
+    result = await get_chart(ticker, force=force, theme=theme)
     result = await attach_news_context(result, ticker)
     result = await attach_fundamentals(result, ticker)
     return result, build_rationale(result)
