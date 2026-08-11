@@ -111,6 +111,19 @@ def _fetch_index_blocking() -> Any:
     return df
 
 
+def _zone_summary(zone: Any) -> Optional[Dict[str, Any]]:
+    """Compact zone payload for the IHSG report — band, strength, evidence."""
+    if zone is None:
+        return None
+    return {
+        "low": round(zone.low, 2),
+        "high": round(zone.high, 2),
+        "label": zone.label,
+        "strength": zone.strength,
+        "evidence": zone.evidence(),
+    }
+
+
 def _compute_technicals(df: Any) -> Dict[str, Any]:
     """EMA20/50/200, RSI14, MACD and nearest S/R for the index."""
     import numpy as np
@@ -118,7 +131,9 @@ def _compute_technicals(df: Any) -> Dict[str, Any]:
     from ta.trend import EMAIndicator, MACD
     from ta.volatility import AverageTrueRange
 
-    from ta_engine.indicators import build_levels, nearest_levels
+    # Zones, not the old single-price levels: the index report and /chart must
+    # not disagree about where support is for the same symbol.
+    from ta_engine.support_resistance import build_zones, nearest_zones
 
     close, high, low = df["Close"], df["High"], df["Low"]
 
@@ -145,11 +160,16 @@ def _compute_technicals(df: Any) -> Dict[str, Any]:
     atr = _last(atr_series) or 0.0
 
     support = resistance = None
+    support_zone = resistance_zone = None
     if atr > 0:
         entry = float(close.iloc[-1])
-        sup, res = nearest_levels(entry, build_levels(df, atr))
-        support = round(sup.price, 2) if sup else None
-        resistance = round(res.price, 2) if res else None
+        sup, res = nearest_zones(entry, build_zones(df, atr, entry))
+        # Headline numbers report the edge price meets first — the TOP of a
+        # support band, the BOTTOM of a resistance band.
+        support = round(sup.high, 2) if sup else None
+        resistance = round(res.low, 2) if res else None
+        support_zone = _zone_summary(sup)
+        resistance_zone = _zone_summary(res)
 
     last_close = float(close.iloc[-1])
     prev_close = float(close.iloc[-2]) if len(close) > 1 else None
@@ -171,6 +191,8 @@ def _compute_technicals(df: Any) -> Dict[str, Any]:
         "macd_histogram": round(macd_hist, 4) if macd_hist else None,
         "support": support,
         "resistance": resistance,
+        "support_zone": support_zone,
+        "resistance_zone": resistance_zone,
         "as_of": df.index[-1].strftime("%Y-%m-%d"),
     }
 
@@ -301,14 +323,21 @@ def synthesise_prospect(
             f"MACD histogram {'positif' if hist >= 0 else 'negatif'} ({hist:+.2f})"
         )
 
-    # Levels
-    sup, res = tech.get("support"), tech.get("resistance")
+    # Levels. Reported as bands with a strength word, matching /chart — a single
+    # number implies a precision the structure does not have.
+    def _band(zone: Optional[Dict[str, Any]], fallback: Optional[float]) -> Optional[str]:
+        if zone:
+            return f"{zone['low']:,.0f}–{zone['high']:,.0f} ({zone['label']})"
+        return f"{fallback:,.0f}" if fallback else None
+
+    sup = _band(tech.get("support_zone"), tech.get("support"))
+    res = _band(tech.get("resistance_zone"), tech.get("resistance"))
     if sup and res:
-        parts.append(f"Level kunci: support {sup:,.2f}, resistance {res:,.2f}.")
+        parts.append(f"Level kunci: support {sup}, resistance {res}.")
     elif sup:
-        parts.append(f"Support terdekat {sup:,.2f}; resistance belum terbentuk di atas harga.")
+        parts.append(f"Support terdekat {sup}; resistance belum terbentuk di atas harga.")
     elif res:
-        parts.append(f"Resistance terdekat {res:,.2f}; support belum terbentuk di bawah harga.")
+        parts.append(f"Resistance terdekat {res}; support belum terbentuk di bawah harga.")
 
     # Macro colour — only the movers, so the paragraph stays short.
     movers = [c for c in catalysts if c.get("changePercent") is not None

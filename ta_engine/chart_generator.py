@@ -27,7 +27,7 @@ import math
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib
 
@@ -46,10 +46,13 @@ from .indicators import (  # noqa: E402
     EMA_FAST,
     EMA_SLOW,
     RSI_WINDOW,
-    Level,
     add_indicators,
-    build_levels,
-    nearest_levels,
+)
+from .support_resistance import (  # noqa: E402
+    Zone,
+    anchor_zone,
+    build_zones,
+    nearest_zones,
 )
 from .pattern_detector import (  # noqa: E402
     MIN_QUALITY,
@@ -74,6 +77,10 @@ from .price_utils import (  # noqa: E402
 _PATTERN_BULL_COLOR = "#22D3EE"
 _PATTERN_BEAR_COLOR = "#F472B6"
 _PATTERN_NEUTRAL_COLOR = "#A78BFA"
+
+# Band opacity by zone strength — the reader should see which level is solid
+# before reading a single label.
+_ZONE_ALPHA = {"strong": 0.20, "medium": 0.12, "weak": 0.06}
 
 # Blank bars appended to the right of the plot. Without this the newest candles
 # and the TP/SL labels are jammed against the y-axis tick labels and the price
@@ -142,6 +149,9 @@ class ChartResult:
     ticker: str
     chart_path: str
     last_close: float
+    # The edge price meets first: the TOP of a support band, the BOTTOM of a
+    # resistance band. Kept as plain floats for API compatibility; the band
+    # itself and its strength live in support_zone / resistance_zone below.
     support: Optional[float]
     resistance: Optional[float]
     # None for an index — see `trade_direction`.
@@ -216,6 +226,18 @@ class ChartResult:
     fundamentals: Optional[Dict[str, Any]] = None
     fundamentals_summary: Optional[str] = None
 
+    # ── Scored S/R zones ─────────────────────────────────────────────────────
+    # Support is a band, not a price, and bands differ in how much they have
+    # earned their line. `strength` is KUAT / SEDANG / LEMAH — a summary of
+    # structural evidence (tests, hold record, recency, volume traded inside),
+    # NOT a probability that the level will hold. Support breaks all the time.
+    # See ta_engine.support_resistance.
+    support_zone: Optional[Dict[str, Any]] = None
+    resistance_zone: Optional[Dict[str, Any]] = None
+    # Every zone found, low to high — for charting and for callers that want
+    # more than the two nearest.
+    zones: List[Dict[str, Any]] = field(default_factory=list)
+
     disclaimer: str = DISCLAIMER
 
     def to_dict(self) -> Dict[str, Any]:
@@ -224,6 +246,35 @@ class ChartResult:
         # for the existing API/Telegram callers.
         d["stop_loss"] = d.get("sl")
         return d
+
+
+def _zone_dict(zone: Optional[Zone], ticker: str) -> Optional[Dict[str, Any]]:
+    """
+    Serialise a Zone for the API/Telegram layer, with prices on the IDX grid.
+
+    Band edges round OUTWARD (low down, high up) so the published band always
+    contains the computed one — rounding inward would quietly shrink a zone and
+    could place a level outside the band it is supposed to sit in.
+    """
+    if zone is None:
+        return None
+    return {
+        "low": round_level(zone.low, ticker, direction="floor"),
+        "high": round_level(zone.high, ticker, direction="ceil"),
+        "mid": round_level(zone.mid, ticker),
+        "kind": zone.kind,
+        "strength": zone.strength,
+        "label": zone.label,
+        "score": round(zone.score, 3),
+        "tests": zone.tests,
+        "holds": zone.holds,
+        "breaks": zone.breaks,
+        "bars_since_test": zone.bars_since_test,
+        "volume_share": round(zone.volume_share, 4),
+        "span_bars": zone.span_bars,
+        "flipped": zone.flipped,
+        "evidence": zone.evidence(),
+    }
 
 
 def _fetch_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame:
@@ -253,50 +304,72 @@ def _fetch_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame:
 def _compute_trade_levels(
     entry: float,
     atr: float,
-    support: Optional[Level],
-    resistance: Optional[Level],
+    zones: Sequence[Zone],
     ticker: Optional[str] = None,
     direction: str = "long",
 ) -> Dict[str, Any]:
     """
-    Stop below structure, targets at fixed R multiples.
+    Stop below the strongest nearby structure, targets at fixed R multiples.
 
-    The stop goes below the nearest support (buffered by ATR) because that level
-    is what invalidates a long thesis — if it breaks, the reason for the trade is
-    gone. With no support below price we fall back to a pure ATR stop.
+    The stop is anchored on the nearest zone that is at least SEDANG strength —
+    NOT merely the nearest zone. Anchoring on the nearest one put the stop under
+    whatever scribble happened to be closest: on ASII a band that had held once
+    and broken three times sat 1.4 ATR above a level that had actually held, and
+    the stop hung off the weaker of the two. If the thesis is "support holds",
+    the stop belongs under support that has a record of holding.
 
-    Targets are then derived from the resulting risk, so the 1:2 minimum holds by
-    construction regardless of which stop was used.
+    The stop sits under the zone's FAR EDGE (its low, for a long), not its mid —
+    a zone is a band and price routinely trades through the middle of it before
+    being rejected. Stopping out at the midpoint means being stopped out inside
+    the very structure the trade is leaning on.
+
+    Targets derive from the resulting risk, so the 1:2 minimum holds by
+    construction whichever stop was used.
     """
     warnings: List[str] = []
     short = direction == "short"
+    side = "resistance" if short else "support"
+    anchor, nearest = anchor_zone(
+        entry, zones, side, min_strength="medium", atr=atr
+    )
+
+    if anchor is not None and nearest is not None and anchor is not nearest:
+        near_edge = nearest.low if short else nearest.high
+        far_edge = anchor.high if short else anchor.low
+        side_id = "atas" if short else "bawah"
+        warnings.append(
+            f"Stop dipasang di {side_id} zona {anchor.label} ({far_edge:,.0f}), "
+            f"bukan zona {nearest.label} yang lebih dekat ({near_edge:,.0f} — "
+            f"{nearest.evidence()}). Level terdekat itu jarang bertahan, jadi "
+            f"stop di situ berdiri di struktur yang lemah."
+        )
 
     if short:
         # Mirror image: a breakdown thesis is invalidated by price reclaiming
         # RESISTANCE, so the stop sits above it and targets project downward.
         atr_stop = entry + _ATR_STOP_MULT * atr
-        if resistance is not None and resistance.price > entry:
-            structure_stop = resistance.price + _SUPPORT_BUFFER_ATR * atr
+        if anchor is not None:
+            structure_stop = anchor.high + _SUPPORT_BUFFER_ATR * atr
             # Higher of the two, so a tight ATR stop can't sit inside supply.
             sl = max(atr_stop, structure_stop)
         else:
             sl = atr_stop
             warnings.append(
-                "No confirmed resistance above price — stop is ATR-derived only, "
-                "with no structural level backing it."
+                "Tidak ada zona resistance di atas harga yang cukup kuat — stop "
+                "murni dari ATR, tanpa level struktur yang menopangnya."
             )
     else:
         atr_stop = entry - _ATR_STOP_MULT * atr
-        if support is not None and support.price < entry:
-            structure_stop = support.price - _SUPPORT_BUFFER_ATR * atr
+        if anchor is not None:
+            structure_stop = anchor.low - _SUPPORT_BUFFER_ATR * atr
             # Take the lower (safer) of the two so a tight ATR stop can't sit inside
             # a support zone where noise would stop us out.
             sl = min(atr_stop, structure_stop)
         else:
             sl = atr_stop
             warnings.append(
-                "No confirmed support below price — stop is ATR-derived only, "
-                "with no structural level backing it."
+                "Tidak ada zona support di bawah harga yang cukup kuat — stop "
+                "murni dari ATR, tanpa level struktur yang menopangnya."
             )
 
     # Snap the stop onto the IDX grid BEFORE deriving anything from it, then
@@ -333,30 +406,47 @@ def _compute_trade_levels(
     risk_fraction = risk / entry
     if risk_fraction > _MAX_RISK_FRACTION:
         warnings.append(
-            f"Stop is {risk_fraction:.1%} {'above' if short else 'below'} entry — "
-            f"unusually wide; position sizing matters more than the levels here."
+            f"Stop {risk_fraction:.1%} {'di atas' if short else 'di bawah'} harga "
+            f"masuk — tergolong sangat lebar. Ukuran posisi (position sizing) "
+            f"lebih menentukan di sini daripada levelnya."
         )
 
     # A target you can only reach by punching through known structure is not a
-    # 2R target in practice. Say so rather than quietly returning it.
+    # 2R target in practice. Say so rather than quietly returning it. Only
+    # SEDANG-or-better zones raise this: a LEMAH band in the way is noise, and
+    # warning on it would bury the real obstacles.
+    # The zone must lie ENTIRELY between entry and TP1. Testing the near edge
+    # instead would flag the band price is currently sitting inside — on ASII
+    # that reported a "blocking" zone straddling the last close, which is not an
+    # obstacle on the way to the target, it is where price already is.
+    blocking = [
+        z for z in zones
+        if z.strength != "weak"
+        and ((short and tp1 < z.high < entry) or (not short and entry < z.low < tp1))
+    ]
     if short:
-        if support is not None and support.price > tp1:
+        if blocking:
+            # First obstacle on the way DOWN is the highest qualifying zone.
+            z = max(blocking, key=lambda z: z.high)
             warnings.append(
-                f"Support at {support.price:,.2f} sits above TP1 ({tp1:,.2f}) — "
-                f"the 1:2 target requires breaking that level first."
+                f"Ada support {z.low:,.0f}–{z.high:,.0f} ({z.label}) di atas TP1 "
+                f"({tp1:,.0f}) — target 1:2 baru tercapai kalau level itu jebol "
+                f"dulu."
             )
         # IDX retail has no practical way to short a single stock, so a
         # breakdown frame is risk management (trim / stand aside), not a trade
         # to place. Saying so prevents it being read as a sell-short signal.
         warnings.append(
-            "Bearish setup: IDX retail generally cannot short single stocks, so "
-            "these levels describe downside risk and invalidation — not a "
-            "short position to open."
+            "Setup bearish: ritel IDX umumnya tidak bisa short saham individu, "
+            "jadi level-level ini menggambarkan risiko turun dan titik batal "
+            "tesis — bukan posisi short untuk dibuka."
         )
-    elif resistance is not None and resistance.price < tp1:
+    elif blocking:
+        # First obstacle on the way UP is the lowest qualifying zone.
+        z = min(blocking, key=lambda z: z.low)
         warnings.append(
-            f"Resistance at {resistance.price:,.2f} sits below TP1 "
-            f"({tp1:,.2f}) — the 1:2 target requires breaking that level first."
+            f"Ada resistance {z.low:,.0f}–{z.high:,.0f} ({z.label}) di bawah TP1 "
+            f"({tp1:,.0f}) — target 1:2 baru tercapai kalau level itu tembus dulu."
         )
 
     return {
@@ -366,6 +456,7 @@ def _compute_trade_levels(
         "risk": risk,
         "direction": direction,
         "warnings": warnings,
+        "stop_anchor": anchor,
     }
 
 
@@ -401,8 +492,8 @@ def _render_chart(
     df: pd.DataFrame,
     ticker: str,
     levels: Dict[str, Any],
-    support: Optional[Level],
-    resistance: Optional[Level],
+    support: Optional[Zone],
+    resistance: Optional[Zone],
     out_path: Path,
     plot_bars: int,
     patterns: Optional[List[Pattern]] = None,
@@ -410,8 +501,16 @@ def _render_chart(
     sentiment: str = "NEUTRAL",
     volume_events: Optional[List[Any]] = None,
     entry_plan: Optional[Dict[str, Any]] = None,
+    stop_anchor: Optional[Zone] = None,
 ) -> None:
-    """Candlestick + EMA overlays + green (support/TP) and red (resistance/SL) lines."""
+    """
+    Candlestick + EMA overlays + green (support/TP) and red (resistance/SL).
+
+    Support and resistance draw as SHADED BANDS, not lines: they are zones, and
+    a single line implies a precision the structure does not have. Opacity
+    tracks strength, so a KUAT shelf is visibly more solid than a LEMAH one at a
+    glance, before any label is read.
+    """
     plot_df = df.tail(plot_bars)
     patterns = patterns or []
 
@@ -424,10 +523,6 @@ def _render_chart(
     show_trade = not is_index_symbol(ticker)
     green = [levels["tp1"], levels["tp2"]] if show_trade else []
     red = [levels["sl"]] if show_trade else []
-    if support is not None:
-        green.append(support.price)
-    if resistance is not None:
-        red.append(resistance.price)
 
     hlines = dict(
         hlines=green + red,
@@ -492,6 +587,29 @@ def _render_chart(
             # with the y-axis ticks, and projected TP lines have somewhere to run.
             x_lo, x_hi = ax.get_xlim()
             ax.set_xlim(x_lo, x_hi + _RIGHT_MARGIN_BARS)
+
+            # Support / resistance bands, drawn before anything else so candles
+            # and level labels sit on top of them.
+            #
+            # The stop-anchor zone is drawn too when it is not already one of
+            # the two: the stop can sit well away from the nearest level, and a
+            # SL line floating in empty space gives the reader no way to see
+            # what it is resting on.
+            bands = [(support, "#22C55E"), (resistance, "#F43F5E")]
+            if stop_anchor is not None and stop_anchor not in (support, resistance):
+                bands.append((stop_anchor, "#94A3B8"))
+            for zone, color in bands:
+                if zone is None:
+                    continue
+                ax.axhspan(
+                    zone.low, zone.high,
+                    facecolor=color,
+                    alpha=_ZONE_ALPHA[zone.strength],
+                    edgecolor=color,
+                    linewidth=0.8,
+                    linestyle="--",
+                    zorder=0,
+                )
 
             # A fitted boundary can start well above/below the candles it was
             # derived from — a symmetrical triangle's upper line especially.
@@ -560,14 +678,24 @@ def _render_chart(
             # raw level instead would print a number like 4,184 that is not a
             # legal Rp10 tick, and would disagree with the 4,180 the API returns
             # for the same line.
+            # The label sits on the edge price MEETS — the top of a support band,
+            # the bottom of a resistance band — because that is the level a
+            # reader would actually place an order against. The shaded span
+            # already shows how far the zone extends behind it.
             if support is not None:
-                sup_px = round_level(support.price, ticker)
-                annotations.append((support.price, f"Support {fmt(sup_px)}", "#22C55E"))
+                sup_px = round_level(support.high, ticker, direction="ceil")
+                annotations.append((
+                    support.high,
+                    f"Support {fmt(sup_px)} · {support.label}",
+                    "#22C55E",
+                ))
             if resistance is not None:
-                res_px = round_level(resistance.price, ticker)
-                annotations.append(
-                    (resistance.price, f"Resistance {fmt(res_px)}", "#F43F5E")
-                )
+                res_px = round_level(resistance.low, ticker, direction="floor")
+                annotations.append((
+                    resistance.low,
+                    f"Resistance {fmt(res_px)} · {resistance.label}",
+                    "#F43F5E",
+                ))
 
             # Support / resistance / SL routinely land within a few percent of
             # each other, and right-aligned labels at the same y overlap into an
@@ -772,8 +900,9 @@ class _TimeframeAnalysis:
     entry: float
     atr: float
     rsi: float
-    support: Optional[Level]
-    resistance: Optional[Level]
+    support: Optional[Zone]
+    resistance: Optional[Zone]
+    zones: List[Zone]
     trade: Dict[str, Any]
     patterns: List[Pattern]
 
@@ -796,7 +925,8 @@ def _analyse_timeframe(
     if not math.isfinite(atr) or atr <= 0:
         raise ValueError(f"ATR is {atr} for {symbol} @{interval} — cannot size a stop")
 
-    support, resistance = nearest_levels(entry, build_levels(df, atr))
+    zones = build_zones(df, atr, entry)
+    support, resistance = nearest_zones(entry, zones)
     # Patterns first: the trade frame follows the detected structure. Presenting
     # long targets beneath a "WARNING / BEARISH" badge is a direct
     # contradiction — the badge says price should fall while the numbers
@@ -804,7 +934,7 @@ def _analyse_timeframe(
     patterns = detect_patterns(df, min_quality=min_pattern_quality, atr=atr)
     frame = "short" if (patterns and patterns[0].direction == "bearish") else "long"
     trade = _compute_trade_levels(
-        entry, atr, support, resistance, ticker=symbol, direction=frame
+        entry, atr, zones, ticker=symbol, direction=frame
     )
 
     return _TimeframeAnalysis(
@@ -815,6 +945,7 @@ def _analyse_timeframe(
         rsi=rsi,
         support=support,
         resistance=resistance,
+        zones=zones,
         trade=trade,
         patterns=patterns,
     )
@@ -920,7 +1051,10 @@ def generate_chart(
     plan = build_entry_plan(
         close=entry,
         atr=atr,
-        support=support.price if support else None,
+        # The zone's UPPER edge: that is where a pullback first meets the band,
+        # so it is where a buy limit belongs. Using the mid would sit the order
+        # inside the zone and only fill if price cut halfway through it.
+        support=support.high if support else None,
         stop_loss=None if is_index else trade["sl"],
         tp1=None if is_index else trade["tp1"],
         ticker=symbol,
@@ -932,6 +1066,7 @@ def generate_chart(
         df, symbol, trade, support, resistance, out_path, plot_bars, patterns,
         timeframe=chosen.timeframe, sentiment=sentiment,
         volume_events=volume_events, entry_plan=plan,
+        stop_anchor=None if is_index else trade.get("stop_anchor"),
     )
 
     warnings = list(trade["warnings"])
@@ -960,8 +1095,15 @@ def generate_chart(
         # Support/resistance are descriptive, so nearest is right for them.
         # tp/sl were already snapped directionally inside _compute_trade_levels
         # — round_level here is a no-op for IDX and preserves floats elsewhere.
-        support=round_level(support.price, symbol) if support else None,
-        resistance=round_level(resistance.price, symbol) if resistance else None,
+        # Headline support/resistance stay single numbers for API compatibility
+        # and report the edge price MEETS first — the top of a support band, the
+        # bottom of a resistance band. The full band and its strength travel in
+        # support_zone / resistance_zone.
+        support=round_level(support.high, symbol) if support else None,
+        resistance=round_level(resistance.low, symbol) if resistance else None,
+        support_zone=_zone_dict(support, symbol),
+        resistance_zone=_zone_dict(resistance, symbol),
+        zones=[_zone_dict(z, symbol) for z in chosen.zones],
         # An index has no tradeable instrument behind it — IDX retail cannot buy
         # ^JKSE — so quoting entry/target/stop on it invents a position that
         # cannot be taken. Support and resistance still stand as analysis.

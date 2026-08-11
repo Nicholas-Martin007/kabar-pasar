@@ -14,13 +14,21 @@ investment advice — see `chart_generator.DISCLAIMER`.
 
 from .chart_generator import DISCLAIMER, ChartResult, generate_chart
 from .indicators import Level, add_indicators, build_levels, nearest_levels
+from .support_resistance import Zone, build_zones, nearest_zones
 
 __all__ = [
     "generate_chart",
     "ChartResult",
     "DISCLAIMER",
-    "Level",
     "add_indicators",
+    # Scored S/R zones — what everything user-facing should use.
+    "Zone",
+    "build_zones",
+    "nearest_zones",
+    # Legacy single-price levels. Superseded by the zone API above: these
+    # measure no strength, mix formulaic pivots into their touch counts, and
+    # collapse a band to one number. Kept only so nothing external breaks.
+    "Level",
     "build_levels",
     "nearest_levels",
 ]

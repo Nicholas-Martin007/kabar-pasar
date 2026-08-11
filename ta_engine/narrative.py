@@ -12,7 +12,7 @@ disclaimer travels with it.
 """
 
 import html
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from .pattern_detector import explain_pattern
 from .price_utils import format_price
@@ -51,6 +51,41 @@ def _trend_phrase(close: float, ema20: float, ema50: float) -> str:
     return "EMA20 di bawah EMA50 sementara harga mencoba naik — potensi <b>pembalikan</b>, belum terkonfirmasi"
 
 
+_STRENGTH_ICON = {"KUAT": "🟩", "SEDANG": "🟨", "LEMAH": "⬜"}
+
+
+def _zone_lines(
+    icon: str,
+    name: str,
+    zone: Optional[dict],
+    fallback: Optional[float],
+    cur: str,
+) -> List[str]:
+    """
+    Render one S/R zone as band + strength + the evidence behind the strength.
+
+    The evidence line is not decoration. "KUAT" on its own is a claim the reader
+    has to take on trust; "9 tes · 7 bertahan · 2 jebol" is the actual finding,
+    and it lets someone disagree with the label. It also keeps the wording
+    honest — a level described as strong that broke twice says so out loud.
+    """
+    if not zone:
+        if fallback is not None:
+            return [f"{icon} {name}: <b>{format_price(fallback, cur)}</b>"]
+        return [f"{icon} {name}: <i>tidak terdeteksi</i>"]
+
+    lo, hi = zone["low"], zone["high"]
+    band = (
+        format_price(lo, cur) if lo == hi
+        else f"{format_price(lo, cur)}–{format_price(hi, cur)}"
+    )
+    mark = _STRENGTH_ICON.get(zone["label"], "")
+    return [
+        f"{icon} {name}: <b>{band}</b> · {mark} <b>{zone['label']}</b>",
+        f"   <i>{zone['evidence']}</i>",
+    ]
+
+
 def build_rationale(result: "ChartResult") -> str:
     """HTML-formatted (Telegram parse_mode=HTML) technical summary."""
     cur = result.currency
@@ -67,14 +102,13 @@ def build_rationale(result: "ChartResult") -> str:
         "<b>Level kunci</b>",
     ]
 
-    if result.support is not None:
-        lines.append(f"🟢 Support: <b>{format_price(result.support, cur)}</b>")
-    else:
-        lines.append("🟢 Support: <i>tidak terdeteksi di bawah harga</i>")
-    if result.resistance is not None:
-        lines.append(f"🔴 Resistance: <b>{format_price(result.resistance, cur)}</b>")
-    else:
-        lines.append("🔴 Resistance: <i>tidak terdeteksi di atas harga</i>")
+    lines += _zone_lines("🟢", "Support", result.support_zone, result.support, cur)
+    lines += _zone_lines("🔴", "Resistance", result.resistance_zone, result.resistance, cur)
+    lines.append(
+        "<i>KUAT/SEDANG/LEMAH = seberapa banyak bukti di level itu (jumlah tes, "
+        "berapa kali bertahan, seberapa baru, volume yang transaksi di sana). "
+        "Ini BUKAN peluang level akan bertahan — support kuat pun bisa jebol.</i>"
+    )
 
     # Mirror the chart's sentiment badge. Without this the image says
     # "WARNING / BEARISH" while the caption beside it says nothing, and the

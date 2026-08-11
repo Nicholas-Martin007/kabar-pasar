@@ -19,7 +19,9 @@ from typing import Any, Dict, List, Optional
 
 import yfinance as yf
 
-from .indicators import add_indicators, build_levels, nearest_levels
+from .indicators import add_indicators
+from .price_utils import round_level
+from .support_resistance import build_zones, nearest_zones
 from .pattern_detector import detect_patterns, detect_rsi_divergence
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,11 @@ _W_RSI_RECOVERING = 15  # RSI climbing back out of oversold
 _W_UPTREND = 25         # EMA20 > EMA50
 _W_ABOVE_EMA20 = 10     # price reclaimed the fast EMA
 _W_NEAR_SUPPORT = 15    # sitting close to a defended level
+
+# The "near support" bonus is scaled by how well that support has actually held.
+# Proximity to a level that breaks three times out of four is not a reason to
+# rank a name higher, and treating it as one was the previous behaviour.
+_SUPPORT_STRENGTH_WEIGHT = {"strong": 1.0, "medium": 0.6, "weak": 0.2}
 
 # ── Structure weights ────────────────────────────────────────────────────────
 # Scaled by the pattern's shape quality, so a 0.95 Double Bottom counts for more
@@ -95,6 +102,9 @@ class Pick:
     # Set when bearish structure dragged the score down. Surfaced so a name
     # missing from the results can be explained rather than just absent.
     penalised: bool = False
+    # KUAT / SEDANG / LEMAH for the nearest support. Structural evidence, not a
+    # probability the level holds — see ta_engine.support_resistance.
+    support_strength: Optional[str] = None
 
     # ── Fundamentals (only when `with_fundamentals=True`) ────────────────────
     per: Optional[float] = None
@@ -108,9 +118,17 @@ class Pick:
 
 
 def _score_one(ticker: str) -> Optional[Pick]:
-    """Blocking: one yfinance call + indicator maths. Run via to_thread."""
+    """
+    Blocking: one yfinance call + indicator maths. Run via to_thread.
+
+    Uses the same 1-year window as chart_generator on purpose. Zone strength
+    depends on how many tests fit in the window, so a 6-month pull rated BBCA's
+    support SEDANG while /chart called the same band KUAT — one ticker, two
+    answers, from nothing but the lookback. The extra six months costs no extra
+    request, only a slightly larger payload.
+    """
     try:
-        df = yf.Ticker(ticker).history(period="6mo", interval="1d")
+        df = yf.Ticker(ticker).history(period="1y", interval="1d")
         if df is None or df.empty:
             return None
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
@@ -128,8 +146,7 @@ def _score_one(ticker: str) -> Optional[Pick]:
     if not all(math.isfinite(v) for v in (close, rsi, ema20, ema50, atr)):
         return None
 
-    levels = build_levels(df, atr)
-    support, resistance = nearest_levels(close, levels)
+    support, resistance = nearest_zones(close, build_zones(df, atr, close))
 
     score = 0
     reasons: List[str] = []
@@ -150,11 +167,19 @@ def _score_one(ticker: str) -> Optional[Pick]:
 
     if support is not None and atr > 0:
         # "Near" is measured in ATR, not percent, so it means the same thing on
-        # a volatile small-cap and a sleepy blue chip.
-        distance_atr = (close - support.price) / atr
+        # a volatile small-cap and a sleepy blue chip. Distance is to the band's
+        # UPPER edge — that is where price first meets the zone.
+        distance_atr = (close - support.high) / atr
         if 0 <= distance_atr <= 1.5:
-            score += _W_NEAR_SUPPORT
-            reasons.append(f"Dekat support {support.price:,.0f}")
+            # Scaled by strength: sitting on a shelf that has held nine times is
+            # not the same setup as sitting on one that broke three times out of
+            # four, and scoring them identically was the old behaviour.
+            weight = _SUPPORT_STRENGTH_WEIGHT[support.strength]
+            score += int(round(_W_NEAR_SUPPORT * weight))
+            reasons.append(
+                f"Dekat support {support.low:,.0f}–{support.high:,.0f} "
+                f"({support.label})"
+            )
 
     # ── Chart structure ──────────────────────────────────────────────────────
     # Free: the dataframe is already in hand, so this costs no extra network.
@@ -217,8 +242,13 @@ def _score_one(ticker: str) -> Optional[Pick]:
         ema20=round(ema20, 4),
         ema50=round(ema50, 4),
         atr=round(atr, 4),
-        support=round(support.price, 4) if support else None,
-        resistance=round(resistance.price, 4) if resistance else None,
+        # Edge price meets first: top of a support band, bottom of a resistance
+        # band, snapped to the IDX tick grid — same convention as ChartResult,
+        # so the screener and /chart quote the same number for the same ticker
+        # rather than 1,488 against 1,490.
+        support=round_level(support.high, ticker, direction="ceil") if support else None,
+        resistance=round_level(resistance.low, ticker, direction="floor") if resistance else None,
+        support_strength=support.label if support else None,
         currency="IDR" if ticker.endswith(".JK") else "USD",
         as_of=df.index[-1].strftime("%Y-%m-%d"),
     )
