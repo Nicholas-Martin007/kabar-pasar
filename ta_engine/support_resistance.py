@@ -36,9 +36,28 @@ Weights favour hold ratio and test count because those are direct evidence of
 the level doing its job. Volume is weighted lowest: it is approximated from
 bar ranges, not from true volume-at-price (tick data, which we don't have).
 
-Two small bonuses sit on top: a polarity flip (the band worked as both support
-and resistance) and weekly confluence (the level is also significant on the
-weekly chart — see MIN_HTF_PIVOTS for why that test has to be strict).
+A polarity flip (the band worked as both support and resistance) adds a small
+bonus. Weekly confluence is detected and reported but adds NOTHING to the score
+— see HTF_CONFLUENCE_BONUS for the measurement that settled that.
+
+## Does the label actually work?
+
+Yes, modestly, and it was tested rather than assumed. Walk-forward across 30 IDX
+names over 2 years — zones built only from data before each test, ~7,300
+out-of-sample outcomes:
+
+    KUAT    70.9% held (n=1,860)
+    SEDANG  66.6% held (n=2,772)
+    LEMAH   60.6% held (n=2,643)
+
+Monotonic, and the KUAT-vs-LEMAH gap is ~10 points at z≈7.
+
+Read that carefully before relying on it. **Even LEMAH zones hold 61% of the
+time** — the label ranks levels, it does not separate safe from unsafe, and the
+gap between best and worst is ten points, not fifty. Hold rate is also not
+profitability: a level that holds 70% of the time and gives back three times the
+average gain on the other 30% is a losing trade. Reproduce with
+`ta_engine/zone_backtest.py`.
 """
 
 from __future__ import annotations
@@ -87,12 +106,21 @@ _PROMINENCE_WEIGHTS: Dict[str, float] = {
 # price that matters, it just isn't reliable.
 RELIABILITY_FLOOR = 0.45
 
-# Bonus when a daily zone coincides with one on the WEEKLY chart. A level that
-# only exists on the daily is a level daily traders defend; one that also shows
-# on the weekly is where longer-horizon money is positioned, and those hold
-# through noise that flushes the daily-only ones. Weekly bars are resampled from
-# the daily frame already in hand, so this costs no extra request.
-HTF_CONFLUENCE_BONUS = 0.08
+# Score bonus when a daily zone coincides with one on the WEEKLY chart.
+#
+# MEASURED AT ZERO, deliberately. Walk-forward over 30 IDX names (2y daily,
+# ~7,300 out-of-sample tests) says weekly confluence IS independently
+# informative — confluent zones held 68.0% vs 64.7% for the rest, z=2.5 — but
+# feeding it into the score did NOT improve the label's ranking. The
+# strong-vs-weak hold spread went from +10.3pp without the bonus to +9.6pp with
+# it, so the bonus was promoting zones into KUAT on evidence that ranked worse
+# than what was already there.
+#
+# So the flag stays (the user still sees "terlihat juga di chart mingguan",
+# which carries real information) and its effect on the SCORE is zero. Kept as
+# a named constant rather than deleted so the finding is re-testable:
+# ta_engine/zone_backtest.py reproduces both numbers.
+HTF_CONFLUENCE_BONUS = 0.0
 # Minimum bars needed before resampling to weekly is worth doing (~6 months).
 HTF_MIN_BARS = 120
 # A weekly cluster only counts as confluence with this many pivots spread over
