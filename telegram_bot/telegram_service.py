@@ -81,6 +81,7 @@ HELP = (
     "/demo — cara pakai + daftar perintah\n"
     "/buy TPIA 2000 50 · /sell TPIA 2400 50\n"
     "/sl TPIA 1800 · /tp TPIA 2400 · /trail TPIA 5\n"
+    "/lot TPIA 2000 1900 1 — ukuran posisi dari risiko (%)\n"
     "/port — portofolio · /orders · /cancel 3 · /resetdemo\n"
     "<i>Uang virtual. Tidak terhubung ke sekuritas mana pun.</i>\n\n"
     "<b>Lainnya</b>\n"
@@ -936,6 +937,7 @@ _PAPER_HELP = (
     "<code>/sl TPIA 1800</code> — pasang stop loss\n"
     "<code>/tp TPIA 2400</code> — pasang take profit\n"
     "<code>/trail TPIA 5</code> — trailing stop 5%\n"
+    "<code>/lot TPIA 2000 1900 1</code> — hitung ukuran posisi dari risiko\n"
     "<code>/port</code> — portofolio &amp; P&amp;L\n"
     "<code>/orders</code> — order yang masih antre\n"
     "<code>/cancel 3</code> — batalkan order #3\n"
@@ -1186,6 +1188,105 @@ async def handle_trade_command(chat_id: str, cmd: str, args: List[str]) -> bool:
             f"♻️ Akun demo direset. Semua posisi &amp; order dihapus, "
             f"saldo kembali <b>Rp{STARTING_CASH:,.0f}</b>.",
         )
+        return True
+
+    if cmd in ("lot", "size", "sizing"):
+        if len(args) < 3:
+            await send_message(
+                chat_id,
+                "Format: <code>/lot TPIA 2000 1900 1</code>\n"
+                "— kode, harga masuk, stop loss, risiko % (default 1%).\n\n"
+                "<i>Menghitung berapa lot supaya kalau kena stop, ruginya "
+                "sebesar % ekuitas yang kamu tentukan. Ini bagian yang paling "
+                "sering dilewat: yang menentukan selamat atau tidak bukan harga "
+                "masuk, tapi ukuran posisi.</i>",
+            )
+            return True
+        try:
+            ticker = resolve_symbol(args[0])
+            entry = _parse_price(args[1])
+            stop = _parse_price(args[2])
+            risk_pct = float(args[3].replace(",", ".")) if len(args) > 3 else 1.0
+        except ValueError:
+            await send_message(chat_id, "⚠️ Angka tidak valid.")
+            return True
+
+        from backend.services.idx_rules import LOT_SIZE, size_position
+
+        async with get_session() as session:
+            snap = await portfolio(session, chat_id, {})
+        prices = await _live_prices([ticker])
+        async with get_session() as session:
+            snap = await portfolio(session, chat_id, prices)
+
+        equity, cash = snap["equity"], snap["cash"]
+        sizing = size_position(equity, cash, entry, stop, risk_pct)
+        short = ticker.replace(".JK", "")
+
+        if sizing is None:
+            if stop >= entry:
+                msg = (
+                    f"⚠️ Stop ({stop:,.0f}) harus di BAWAH harga masuk "
+                    f"({entry:,.0f}) untuk posisi beli."
+                )
+            else:
+                msg = (
+                    f"⚠️ Dengan risiko {risk_pct:g}% dari ekuitas "
+                    f"Rp{equity:,.0f}, budget-nya tidak cukup untuk 1 lot "
+                    f"({LOT_SIZE} lembar) di harga {entry:,.0f}."
+                )
+            await send_message(chat_id, msg)
+            return True
+
+        stop_dist_pct = (entry - stop) / entry * 100
+        lines = [
+            f"🧮 <b>Ukuran posisi {short}</b>",
+            "",
+            f"Masuk <b>{entry:,.0f}</b> · stop <b>{stop:,.0f}</b> "
+            f"(−{stop_dist_pct:.1f}%)",
+            f"Ekuitas demo: Rp{equity:,.0f}",
+            "",
+            "━━━━━━━━━━━━━━━━━━━━",
+            f"👉 Beli <b>{sizing.lots} lot</b> ({sizing.shares:,} lembar)",
+            f"Modal: <b>Rp{sizing.cost:,.0f}</b> "
+            f"({sizing.cost_pct_of_equity:.1f}% ekuitas)",
+            f"Risiko kalau kena stop: <b>Rp{sizing.risk_total:,.0f}</b> "
+            f"({sizing.risk_pct_of_equity:.2f}% ekuitas)",
+            "━━━━━━━━━━━━━━━━━━━━",
+        ]
+
+        if sizing.capped_by_cash:
+            lines.append(
+                f"ℹ️ Dibatasi saldo, bukan oleh risiko — kas tersisa "
+                f"Rp{cash:,.0f}, jadi lot-nya lebih kecil dari jatah risikomu."
+            )
+        # A very tight stop makes the position size explode: 0.5% risk with a
+        # 5-rupiah stop sized 77% of equity in testing. The risk arithmetic is
+        # correct and the concentration is still reckless — a gap through the
+        # stop skips the whole calculation.
+        if sizing.cost_pct_of_equity > 40:
+            lines.append(
+                f"⚠️ Posisi ini {sizing.cost_pct_of_equity:.0f}% dari ekuitas — "
+                f"sangat terkonsentrasi. Kalau harga <i>gap</i> melewati stop "
+                f"(sering terjadi setelah berita atau ARB), kerugiannya bisa "
+                f"jauh lebih besar dari hitungan di atas."
+            )
+        if stop_dist_pct < 2:
+            lines.append(
+                f"⚠️ Stop cuma −{stop_dist_pct:.1f}% dari harga masuk — "
+                f"kemungkinan besar masih di dalam noise harian, jadi gampang "
+                f"kena walaupun arahnya benar. Cek ATR di <code>/chart {short}</code>."
+            )
+
+        lines += [
+            "",
+            f"<i>Hitungan sudah termasuk biaya beli &amp; jual. Angka ini "
+            f"aritmetika dari input kamu — bukan rekomendasi ukuran posisi, "
+            f"dan kerugian nyata bisa melebihi stop kalau harga gap.</i>",
+            f"<i>Pakai di akun demo: <code>/buy {short} {entry:,.0f} "
+            f"{sizing.lots}</code></i>",
+        ]
+        await send_message(chat_id, "\n".join(lines))
         return True
 
     if cmd in ("demo", "trade", "simulasi"):

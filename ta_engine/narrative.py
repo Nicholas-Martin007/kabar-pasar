@@ -144,6 +144,18 @@ def build_rationale(result: "ChartResult") -> str:
         "Ini BUKAN peluang level akan bertahan — support kuat pun bisa jebol.</i>"
     )
 
+    # Volume profile answers a different question from S/R: not "where did
+    # price turn" but "where did the shares change hands".
+    if result.volume_profile_summary:
+        lines += [
+            "",
+            f"📦 {result.volume_profile_summary}",
+            "<i>POC = harga dengan volume terbanyak ~3 bulan terakhir. Dihitung "
+            "dengan menyebar volume tiap candle merata sepanjang range-nya "
+            "(data tick tidak tersedia), jadi ini perkiraan sebaran — bukan "
+            "angka pasti.</i>",
+        ]
+
     # Mirror the chart's sentiment badge. Without this the image says
     # "WARNING / BEARISH" while the caption beside it says nothing, and the
     # reader has to reconcile the two.
@@ -296,19 +308,38 @@ def build_rationale(result: "ChartResult") -> str:
 
     # Momentum divergence — an exhaustion warning, explicitly not a reversal
     # call, because divergence can persist for weeks in a strong trend.
-    if result.rsi_divergence:
-        d = result.rsi_divergence
-        icon = "🔴" if d["direction"] == "bearish" else "🟢"
-        lines += [
-            "",
-            _DIV,
-            f"{icon} <b>{d['type']}</b>",
-            f"   {d['from']['date']} RSI {d['from']['rsi']:.0f} → "
-            f"{d['to']['date']} RSI {d['to']['rsi']:.0f} "
-            f"(harga bergerak berlawanan)",
+    divs = [d for d in (result.rsi_divergence, result.stoch_divergence) if d]
+    if divs:
+        lines += ["", _DIV]
+        for d in divs:
+            icon = "🔴" if d["direction"] == "bearish" else "🟢"
+            ind = d.get("indicator", "RSI")
+            lines += [
+                f"{icon} <b>{d['type']}</b>",
+                f"   {d['from']['date']} {ind} {d['from']['rsi']:.0f} → "
+                f"{d['to']['date']} {ind} {d['to']['rsi']:.0f} "
+                f"(harga bergerak berlawanan)",
+            ]
+        # Two oscillators saying the same thing is corroboration; saying
+        # opposite things is a genuine conflict the reader should see, not
+        # something to quietly resolve by picking one.
+        if len(divs) == 2:
+            if divs[0]["direction"] == divs[1]["direction"]:
+                lines.append(
+                    "<i>RSI dan Stochastic sama-sama menunjukkan divergensi ke "
+                    "arah yang sama — sinyal momentum ini lebih terkonfirmasi.</i>"
+                )
+            else:
+                lines.append(
+                    "<i>⚠️ RSI dan Stochastic BERTENTANGAN. Keduanya mengukur hal "
+                    "berbeda (RSI: besar kenaikan vs penurunan; Stochastic: posisi "
+                    "harga dalam rentang), jadi ini wajar terjadi — artinya "
+                    "momentum belum jelas, bukan berarti salah satunya salah.</i>"
+                )
+        lines.append(
             "<i>Divergensi = peringatan momentum melemah, bukan sinyal balik "
-            "arah. Konfirmasi tetap dari harga.</i>",
-        ]
+            "arah. Konfirmasi tetap dari harga.</i>"
+        )
 
     # Recent headlines, shown unconditionally and unfiltered. This used to be
     # gated on a volume spike, which meant most charts carried no news at all —

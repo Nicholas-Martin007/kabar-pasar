@@ -132,3 +132,77 @@ def describe_costs() -> str:
         f"jual {SELL_FEE_PCT * 100:.2f}% (sudah termasuk pajak final 0,1%). "
         f"1 lot = {LOT_SIZE} lembar."
     )
+
+
+@dataclass(frozen=True)
+class PositionSize:
+    lots: int
+    shares: int
+    entry: float
+    stop: float
+    risk_per_share: float
+    risk_total: float          # rupiah at risk if the stop fills exactly
+    risk_pct_of_equity: float
+    cost: float                # cash needed to open, fees included
+    cost_pct_of_equity: float
+    capped_by_cash: bool       # sizing was limited by the balance, not by risk
+
+
+def size_position(
+    equity: float,
+    cash: float,
+    entry: float,
+    stop: float,
+    risk_pct: float = 1.0,
+) -> Optional[PositionSize]:
+    """
+    How many lots to buy so that being stopped out costs `risk_pct` of equity.
+
+    This is the arithmetic that turns "I like this stock" into a position, and
+    it is the part retail most often skips — position size, not entry price, is
+    what decides whether a losing trade is survivable. Chasing the offer with an
+    arbitrary lot count is exactly the habit the rest of this bot tries not to
+    encourage.
+
+    Risk is measured to the STOP, and the stop distance includes both legs of
+    transaction cost, so the number is what actually leaves the account rather
+    than the naive (entry - stop) x shares.
+
+    Returns None when the inputs cannot produce a position: a stop at or above
+    entry, or a risk budget too small to afford a single lot.
+    """
+    if entry <= 0 or stop <= 0 or stop >= entry or risk_pct <= 0 or equity <= 0:
+        return None
+
+    # Cost-aware risk per share: what is lost buying at `entry` and selling at
+    # `stop`, both legs of fees included.
+    per_share = (entry * (1 + BUY_FEE_PCT)) - (stop * (1 - SELL_FEE_PCT))
+    if per_share <= 0:
+        return None
+
+    budget = equity * (risk_pct / 100.0)
+    lots = int(budget // (per_share * LOT_SIZE))
+    capped = False
+
+    # Never size beyond the cash actually available.
+    affordable = int(cash // (entry * (1 + BUY_FEE_PCT) * LOT_SIZE))
+    if affordable < lots:
+        lots, capped = affordable, True
+    if lots < 1:
+        return None
+
+    shares = lots * LOT_SIZE
+    risk_total = per_share * shares
+    cost = buy_cost(entry, lots).net
+    return PositionSize(
+        lots=lots,
+        shares=shares,
+        entry=entry,
+        stop=stop,
+        risk_per_share=per_share,
+        risk_total=risk_total,
+        risk_pct_of_equity=risk_total / equity * 100.0,
+        cost=cost,
+        cost_pct_of_equity=cost / equity * 100.0,
+        capped_by_cash=capped,
+    )

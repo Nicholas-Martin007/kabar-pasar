@@ -63,8 +63,10 @@ from .pattern_detector import (  # noqa: E402
     Pattern,
     detect_patterns,
     detect_rsi_divergence,
+    detect_stoch_divergence,
 )
 from .news_context import find_volume_spikes  # noqa: E402
+from .volume_profile import VolumeProfile, build_profile, describe as describe_profile  # noqa: E402
 from .price_utils import (  # noqa: E402
     format_price,
     idx_tick_size,
@@ -240,6 +242,9 @@ class ChartResult:
     # Momentum divergence, when present. An exhaustion warning, not a
     # reversal signal — divergence can persist through a strong trend.
     rsi_divergence: Optional[Dict[str, Any]] = None
+    # Same detector on the stochastic. The two measure different things and can
+    # disagree — when they do, the narrative says so rather than picking one.
+    stoch_divergence: Optional[Dict[str, Any]] = None
 
     # Valuation snapshot. Filled by chart_service (network call); every
     # metric is bounds-checked, see ta_engine.fundamentals.
@@ -261,6 +266,16 @@ class ChartResult:
     stoch_k: Optional[float] = None
     stoch_d: Optional[float] = None
 
+    # ── Volume profile ───────────────────────────────────────────────────────
+    # POC / value area over the recent window. `volume_profile_wide` means
+    # volume is smeared too broadly for the value area to be usable as a level
+    # — reported honestly rather than dressed up.
+    poc: Optional[float] = None
+    value_area_low: Optional[float] = None
+    value_area_high: Optional[float] = None
+    volume_profile_wide: bool = False
+    volume_profile_summary: Optional[str] = None
+
     # ── Scored S/R zones ─────────────────────────────────────────────────────
     # Support is a band, not a price, and bands differ in how much they have
     # earned their line. `strength` is KUAT / SEDANG / LEMAH — a summary of
@@ -281,6 +296,20 @@ class ChartResult:
         # for the existing API/Telegram callers.
         d["stop_loss"] = d.get("sl")
         return d
+
+
+def _currency_of(symbol: str) -> str:
+    if symbol.startswith("^"):
+        return "poin"
+    return "IDR" if symbol.endswith(".JK") else "USD"
+
+
+def _profile_px(value: Optional[float], symbol: str) -> Optional[float]:
+    """Volume-profile price for display: IDX tick grid, else 2dp."""
+    if value is None:
+        return None
+    snapped = round_level(value, symbol)
+    return snapped if is_idx_symbol(symbol) else round(float(snapped), 2)
 
 
 def _safe_float(v: Any) -> Optional[float]:
@@ -611,6 +640,7 @@ def _render_chart(
     volume_events: Optional[List[Any]] = None,
     entry_plan: Optional[Dict[str, Any]] = None,
     stop_anchor: Optional[Zone] = None,
+    profile: Optional[VolumeProfile] = None,
 ) -> None:
     """
     Candlestick + EMA overlays + green (support/TP) and red (resistance/SL).
@@ -910,6 +940,30 @@ def _render_chart(
                     f"Resistance {fmt(res_px)} · {resistance.label}",
                     "#F43F5E",
                 ))
+
+            # ── Volume profile: value area + POC ─────────────────────────────
+            #
+            # Drawn as a faint horizontal band plus a POC line, behind
+            # everything else. It answers a different question from the S/R
+            # zones — where volume concentrated, not where price turned — so it
+            # gets its own muted colour rather than competing with green/red.
+            #
+            # Suppressed when the value area is too wide to mean anything:
+            # shading 160% of the price range would look like information while
+            # conveying none.
+            if profile is not None and not profile.is_wide:
+                ax.axhspan(
+                    profile.val, profile.vah,
+                    facecolor="#A78BFA", alpha=0.07, linewidth=0, zorder=0,
+                )
+                ax.axhline(
+                    profile.poc, color="#A78BFA", linewidth=1.0,
+                    linestyle=(0, (6, 3)), alpha=0.75, zorder=1,
+                )
+                # Label the SAME rounded number the payload and caption use.
+                poc_px = _profile_px(profile.poc, ticker)
+                annotations.append((profile.poc, f"POC {fmt(poc_px)}", "#A78BFA"))
+
 
             # Support / resistance / SL routinely land within a few percent of
             # each other, and right-aligned labels at the same y overlap into an
@@ -1275,7 +1329,9 @@ def generate_chart(
     # Volume spikes are found here; the headlines that explain them are
     # attached downstream where the news cache is reachable.
     volume_events = find_volume_spikes(df)
+    profile = build_profile(df, atr)
     divergence = detect_rsi_divergence(df)
+    stoch_div = detect_stoch_divergence(df)
     pattern_levels = (best.key_levels if best else {}) or {}
 
     # Built before rendering: the chart draws the zone, so the plan has to
@@ -1299,6 +1355,7 @@ def generate_chart(
         timeframe=chosen.timeframe, sentiment=sentiment,
         volume_events=volume_events, entry_plan=plan,
         stop_anchor=None if is_index else trade.get("stop_anchor"),
+        profile=profile,
     )
 
     warnings = list(trade["warnings"])
@@ -1333,6 +1390,22 @@ def generate_chart(
         # support_zone / resistance_zone.
         support=round_level(support.high, symbol) if support else None,
         resistance=round_level(resistance.low, symbol) if resistance else None,
+        # One rounding rule for the profile, applied to payload and prose alike.
+        # Rounding the payload to the tick grid while the caption formatted the
+        # raw float printed a value area of 5,675-6,525 next to a sentence
+        # reading 5,681-6,502 — same band, two numbers, no way for a reader to
+        # tell which was real.
+        poc=_profile_px(profile.poc, symbol) if profile else None,
+        value_area_low=_profile_px(profile.val, symbol) if profile else None,
+        value_area_high=_profile_px(profile.vah, symbol) if profile else None,
+        volume_profile_wide=bool(profile and profile.is_wide),
+        volume_profile_summary=(
+            describe_profile(
+                profile, entry,
+                lambda v: format_price(_profile_px(v, symbol), _currency_of(symbol)),
+            )
+            if profile else None
+        ),
         support_zone=_zone_dict(support, symbol),
         resistance_zone=_zone_dict(resistance, symbol),
         zones=[_zone_dict(z, symbol) for z in chosen.zones],
@@ -1384,6 +1457,7 @@ def generate_chart(
         entry_extended=plan["extended"],
         volume_events=[e.to_dict() for e in volume_events],
         rsi_divergence=divergence,
+        stoch_divergence=stoch_div,
     )
 
     logger.info(

@@ -1216,16 +1216,31 @@ _DIV_MAX_BARS = 60
 # RSI must differ by at least this much for the divergence to be real rather
 # than rounding.
 _DIV_MIN_RSI_GAP = 3.0
+# Stochastic routinely traverses the whole 0-100 range, so it needs a far wider
+# gap than RSI before a difference between two pivots means anything.
+_DIV_MIN_STOCH_GAP = 15.0
 
 
-def detect_rsi_divergence(
-    df: pd.DataFrame, lookback: int = 90, rsi_col: str = "rsi14"
+def detect_divergence(
+    df: pd.DataFrame,
+    lookback: int = 90,
+    osc_col: str = "rsi14",
+    label: str = "RSI",
+    min_gap: float = _DIV_MIN_RSI_GAP,
 ) -> Optional[Dict[str, Any]]:
     """
-    Classic momentum divergence between price and RSI.
+    Classic momentum divergence between price and an oscillator.
 
-    Bearish: price prints a HIGHER high while RSI prints a LOWER high — the
-    move is being made on weakening momentum. Bullish is the mirror on lows.
+    Bearish: price prints a HIGHER high while the oscillator prints a LOWER
+    high — the move is being made on weakening momentum. Bullish is the mirror
+    on lows.
+
+    Generic over the oscillator column so RSI and stochastic share one
+    implementation. They are NOT interchangeable readings: RSI measures the size
+    of recent gains against losses, stochastic measures where price closed
+    within its range, so the two can and do disagree. `min_gap` differs because
+    stochastic is far more volatile — a 3-point move means something on RSI and
+    nothing on stochastic.
 
     Uses the same confirmed pivots as the pattern engine, so a divergence never
     rests on an unconfirmed swing that the next candle erases. Returns the most
@@ -1235,6 +1250,7 @@ def detect_rsi_divergence(
     persist for a long time in a strong trend, and price is the thing that
     ultimately confirms or refutes it.
     """
+    rsi_col = osc_col
     if rsi_col not in df.columns or len(df) < 30:
         return None
 
@@ -1255,8 +1271,8 @@ def detect_rsi_divergence(
 
     best: Optional[Dict[str, Any]] = None
     for kind, name, direction in (
-        ("high", "Bearish RSI Divergence", "bearish"),
-        ("low", "Bullish RSI Divergence", "bullish"),
+        ("high", f"Bearish {label} Divergence", "bearish"),
+        ("low", f"Bullish {label} Divergence", "bullish"),
     ):
         same = [p for p in pivots if p.kind == kind]
         # Newest pair first — a stale divergence is not actionable.
@@ -1265,7 +1281,7 @@ def detect_rsi_divergence(
             if not (_DIV_MIN_BARS <= gap <= _DIV_MAX_BARS):
                 continue
             ra, rb = rsi_at(a.idx), rsi_at(b.idx)
-            if ra is None or rb is None or abs(rb - ra) < _DIV_MIN_RSI_GAP:
+            if ra is None or rb is None or abs(rb - ra) < min_gap:
                 continue
 
             if kind == "high":
@@ -1278,6 +1294,7 @@ def detect_rsi_divergence(
             cand = {
                 "type": name,
                 "direction": direction,
+                "indicator": label,
                 "from": {"date": _to_dt(a.ts).strftime("%Y-%m-%d"),
                          "price": round(a.price, 4), "rsi": round(ra, 2)},
                 "to": {"date": _to_dt(b.ts).strftime("%Y-%m-%d"),
@@ -1295,6 +1312,26 @@ def detect_rsi_divergence(
             best["type"], best["rsi_gap"], best["bars_apart"],
         )
     return best
+
+
+def detect_rsi_divergence(
+    df: pd.DataFrame, lookback: int = 90, rsi_col: str = "rsi14"
+) -> Optional[Dict[str, Any]]:
+    """RSI divergence. Thin wrapper kept so existing callers don't change."""
+    return detect_divergence(df, lookback, rsi_col, "RSI", _DIV_MIN_RSI_GAP)
+
+
+def detect_stoch_divergence(
+    df: pd.DataFrame, lookback: int = 90, stoch_col: str = "stoch_k"
+) -> Optional[Dict[str, Any]]:
+    """
+    Stochastic divergence.
+
+    The minimum gap is much larger than RSI's because stochastic swings the
+    full 0-100 range routinely — at RSI's 3-point threshold nearly every pivot
+    pair would "diverge", which would make the signal meaningless.
+    """
+    return detect_divergence(df, lookback, stoch_col, "Stochastic", _DIV_MIN_STOCH_GAP)
 
 
 # ── Plain-language pattern reference ─────────────────────────────────────────
