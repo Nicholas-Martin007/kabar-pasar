@@ -35,6 +35,10 @@ Five components, each normalised to 0..1:
 Weights favour hold ratio and test count because those are direct evidence of
 the level doing its job. Volume is weighted lowest: it is approximated from
 bar ranges, not from true volume-at-price (tick data, which we don't have).
+
+Two small bonuses sit on top: a polarity flip (the band worked as both support
+and resistance) and weekly confluence (the level is also significant on the
+weekly chart — see MIN_HTF_PIVOTS for why that test has to be strict).
 """
 
 from __future__ import annotations
@@ -83,6 +87,26 @@ _PROMINENCE_WEIGHTS: Dict[str, float] = {
 # price that matters, it just isn't reliable.
 RELIABILITY_FLOOR = 0.45
 
+# Bonus when a daily zone coincides with one on the WEEKLY chart. A level that
+# only exists on the daily is a level daily traders defend; one that also shows
+# on the weekly is where longer-horizon money is positioned, and those hold
+# through noise that flushes the daily-only ones. Weekly bars are resampled from
+# the daily frame already in hand, so this costs no extra request.
+HTF_CONFLUENCE_BONUS = 0.08
+# Minimum bars needed before resampling to weekly is worth doing (~6 months).
+HTF_MIN_BARS = 120
+# A weekly cluster only counts as confluence with this many pivots spread over
+# this many weeks.
+#
+# Measured, not guessed. "A weekly pivot sits near this zone" fired on 63% of
+# all zones and tightening the band width barely moved it (65% -> 63%) — because
+# a weekly high IS one of that week's daily highs, so the two timeframes mark
+# almost the same prices by construction. The test is only informative when it
+# demands weekly-SCALE significance: repeated visits, months apart. At 3 pivots
+# over 8 weeks it fires on 25%, which actually distinguishes something.
+MIN_HTF_PIVOTS = 3
+MIN_HTF_SPAN_WEEKS = 8
+
 # Reliability caps on the label, applied once there is a real record to judge.
 STRONG_HOLD_RATIO = 0.60   # below this it cannot be called KUAT
 WEAK_HOLD_RATIO = 0.40     # below this it is LEMAH whatever the score
@@ -110,6 +134,8 @@ class Zone:
     # resistance that became support (or vice versa). A genuine polarity flip is
     # meaningful structure, so it earns a small bonus.
     flipped: bool
+    # True when a weekly zone overlaps this one — see HTF_CONFLUENCE_BONUS.
+    htf_confluence: bool
     tests: int
     holds: int
     breaks: int
@@ -145,6 +171,8 @@ class Zone:
             bits.append(f"{self.volume_share * 100:.0f}% volume")
         if self.flipped:
             bits.append("bekas resisten")
+        if self.htf_confluence:
+            bits.append("terlihat juga di chart mingguan")
         return " · ".join(bits)
 
 
@@ -316,6 +344,93 @@ def _volume_share(df: pd.DataFrame, low: float, high: float) -> float:
     return inside / total
 
 
+def to_weekly(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """
+    Resample a daily frame to weekly OHLCV, or None when it isn't worth it.
+
+    Free: the daily bars are already in hand, so a weekly view costs no extra
+    network call. Returns None for short histories and for frames that are
+    already intraday-or-weekly, where the resample would be meaningless.
+    """
+    if len(df) < HTF_MIN_BARS or not isinstance(df.index, pd.DatetimeIndex):
+        return None
+    # Guard against non-daily input: a 4h frame resampled to weekly would
+    # silently produce a different thing from what the caller expects.
+    spacing = df.index.to_series().diff().median()
+    if pd.isna(spacing) or spacing < pd.Timedelta(hours=20):
+        return None
+
+    weekly = df.resample("W").agg({
+        "Open": "first", "High": "max", "Low": "min",
+        "Close": "last", "Volume": "sum",
+    }).dropna()
+    return weekly if len(weekly) >= 20 else None
+
+
+def _simple_atr(df: pd.DataFrame, window: int = 14) -> float:
+    """
+    Latest ATR from a frame, without pulling in the `ta` dependency.
+
+    Used for the weekly frame only, where a full indicator pass would be
+    wasted — the zone builder needs one scalar for its distance scaling.
+    """
+    high = df["High"].to_numpy(dtype=float)
+    low = df["Low"].to_numpy(dtype=float)
+    close = df["Close"].to_numpy(dtype=float)
+    if len(df) < 2:
+        return 0.0
+    prev = close[:-1]
+    tr = np.maximum.reduce([
+        high[1:] - low[1:],
+        np.abs(high[1:] - prev),
+        np.abs(low[1:] - prev),
+    ])
+    tail = tr[-window:]
+    return float(np.nanmean(tail)) if len(tail) else 0.0
+
+
+def _htf_bands(df: pd.DataFrame, window: int) -> List[Tuple[float, float]]:
+    """
+    (low, high) bands from the weekly chart, for confluence testing.
+
+    Deliberately only the RAW bands — no scoring. A weekly zone's own strength
+    is a separate question; all that matters here is whether the daily level
+    coincides with one that exists at a higher timeframe.
+    """
+    weekly = to_weekly(df)
+    if weekly is None:
+        return []
+    atr = _simple_atr(weekly)
+    if atr <= 0:
+        return []
+
+    pivots = find_swing_points(weekly, window=2)  # weeks are coarse; 2 is enough
+    if not pivots:
+        return []
+
+    min_half = MIN_ZONE_ATR * atr / 2.0
+    bands: List[Tuple[float, float]] = []
+    for cluster in _cluster_pivots(pivots, atr):
+        # Weekly-scale significance, not merely "a weekly pivot exists here".
+        if len(cluster) < MIN_HTF_PIVOTS:
+            continue
+        span_weeks = max(pt[0] for pt in cluster) - min(pt[0] for pt in cluster)
+        if span_weeks < MIN_HTF_SPAN_WEEKS:
+            continue
+
+        prices = [pt[1] for pt in cluster]
+        lo, hi = min(prices), max(prices)
+        if (hi - lo) < 2 * min_half:
+            mid = float(np.mean(prices))
+            lo, hi = mid - min_half, mid + min_half
+        bands.append((float(lo), float(hi)))
+    return bands
+
+
+def _overlaps(a: Tuple[float, float], b: Tuple[float, float]) -> bool:
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
 def _score_zone(
     tests: int,
     holds: int,
@@ -324,6 +439,7 @@ def _score_zone(
     volume_share: float,
     span: int,
     flipped: bool,
+    htf_confluence: bool = False,
 ) -> Tuple[float, float, Dict[str, float]]:
     """
     (score, hold_ratio, components) — the maths stays inspectable on purpose.
@@ -350,6 +466,10 @@ def _score_zone(
     if flipped:
         # Polarity flip is real corroboration: the level mattered to both sides.
         prominence = min(prominence + 0.05, 1.0)
+    if htf_confluence:
+        # Confirmed on a higher timeframe — a wider set of participants is
+        # transacting here, not just the daily crowd.
+        prominence = min(prominence + HTF_CONFLUENCE_BONUS, 1.0)
 
     # How reliably it did its job. Floor at RELIABILITY_FLOOR so a level that
     # always breaks still registers as a price that matters — it just can't be
@@ -392,6 +512,7 @@ def build_zones(
     atr: float,
     price: Optional[float] = None,
     window: int = SWING_WINDOW,
+    use_htf: bool = True,
 ) -> List[Zone]:
     """
     Full scored zone set for `df`, nearest-to-price ordering left to the caller.
@@ -413,6 +534,7 @@ def build_zones(
 
     price = float(price if price is not None else df["Close"].iloc[-1])
     min_half = MIN_ZONE_ATR * atr / 2.0
+    htf = _htf_bands(df, window) if use_htf else []
 
     zones: List[Zone] = []
     for cluster in _cluster_pivots(pivots, atr):
@@ -428,8 +550,9 @@ def build_zones(
 
         tests, holds, breaks, bars_since, span = _count_tests(df, lo, hi, atr)
         vol = _volume_share(df, lo, hi)
+        confluence = any(_overlaps((lo, hi), band) for band in htf)
         score, hold_ratio, _ = _score_zone(
-            tests, holds, breaks, bars_since, vol, span, flipped
+            tests, holds, breaks, bars_since, vol, span, flipped, confluence
         )
 
         zones.append(
@@ -439,6 +562,7 @@ def build_zones(
                 mid=float(mid),
                 kind="support" if mid < price else "resistance",
                 flipped=flipped,
+                htf_confluence=confluence,
                 tests=tests,
                 holds=holds,
                 breaks=breaks,

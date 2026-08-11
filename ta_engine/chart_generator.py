@@ -381,6 +381,7 @@ def _zone_dict(zone: Optional[Zone], ticker: str) -> Optional[Dict[str, Any]]:
         "volume_share": round(zone.volume_share, 4),
         "span_bars": zone.span_bars,
         "flipped": zone.flipped,
+        "htf_confluence": zone.htf_confluence,
         "evidence": zone.evidence(),
     }
 
