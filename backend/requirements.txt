@@ -40,3 +40,7 @@ aiosqlite>=0.20.0
 
 # ── Scheduled background refresh ─────────────────────────────────────────────
 apscheduler>=3.10.4
+
+# Test suite (see tests/ and pytest.ini)
+pytest>=8.0
+pytest-asyncio>=0.23
