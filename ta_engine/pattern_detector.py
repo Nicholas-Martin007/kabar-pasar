@@ -1429,6 +1429,75 @@ PATTERN_GUIDE: Dict[str, Dict[str, str]] = {
 }
 
 
+# ── Measured track record ────────────────────────────────────────────────────
+#
+# Walk-forward test, 30 liquid IDX names, 2 years of daily bars, 20-bar horizon,
+# ~990 out-of-sample detections. `hit` is how often price moved in the pattern's
+# stated direction; `matched` is the same probability for bars with a SIMILAR
+# trailing return, so a pattern only scores if it beats the market condition it
+# was detected in. Reproduce with ta_engine/pattern_backtest.py.
+#
+# The headline finding is uncomfortable and belongs in the open: taken as a
+# group these patterns have NO directional edge (+1.0pp over matched, z=0.6),
+# and `quality_score` does not predict outcome at all — bucketing by quality
+# gives +1.2 / -0.2 / +2.9 / -6.1 pp with every |z| below 1. The 0.80 filter
+# selects for tidy geometry, not for setups that work.
+#
+# The split by direction is where the signal lives, and it runs one way:
+# bullish formations beat their matched baseline by +9.0pp (z=4.0) while
+# bearish ones came in 7.2pp BELOW it (z=-3.2). On this sample, on IDX, bearish
+# patterns were anti-predictive — price rose after them more often than after
+# comparable bars.
+#
+# Caveats that matter: ONE 2-year window, IDX only, no transaction costs, and
+# a directional hit ignores path (a setup that goes 8% against you before
+# closing 1% up counts as a hit here and would have stopped you out). Small n
+# on several entries. This is evidence, not a forecast.
+_PATTERN_TRACK_RECORD: Dict[str, Dict[str, float]] = {
+    "Falling Wedge":              {"n": 201, "hit": 0.572, "matched": 0.435, "z": 3.92},
+    "Double Bottom":              {"n": 134, "hit": 0.545, "matched": 0.454, "z": 2.11},
+    "Bull Flag":                  {"n": 9,   "hit": 0.556, "matched": 0.475, "z": 0.48},
+    "Inverse Head and Shoulders": {"n": 46,  "hit": 0.457, "matched": 0.415, "z": 0.58},
+    "Bull Pennant":               {"n": 42,  "hit": 0.500, "matched": 0.464, "z": 0.47},
+    "Head and Shoulders":         {"n": 62,  "hit": 0.581, "matched": 0.545, "z": 0.56},
+    "Bear Flag":                  {"n": 13,  "hit": 0.615, "matched": 0.613, "z": 0.02},
+    "Ascending Triangle":         {"n": 71,  "hit": 0.465, "matched": 0.463, "z": 0.02},
+    "Double Top":                 {"n": 126, "hit": 0.524, "matched": 0.562, "z": -0.87},
+    "Rising Wedge":               {"n": 137, "hit": 0.453, "matched": 0.513, "z": -1.41},
+    "Descending Triangle":        {"n": 92,  "hit": 0.424, "matched": 0.557, "z": -2.56},
+    "Bear Pennant":               {"n": 61,  "hit": 0.377, "matched": 0.580, "z": -3.22},
+}
+
+# Below this many observations the entry is too thin to quote at all.
+TRACK_RECORD_MIN_N = 40
+# |z| above this is called a real effect; below it, "no measurable edge".
+TRACK_RECORD_Z = 1.5
+
+
+def pattern_track_record(name: str) -> Optional[Dict[str, Any]]:
+    """
+    Measured out-of-sample record for `name`, or None when too thin to quote.
+
+    Returns the raw numbers plus a `verdict` of "helps" | "hurts" | "neutral".
+    Surfaced to users alongside the shape score because the shape score was
+    tested and does NOT predict outcome — leaving "kemiripan bentuk 90%" as the
+    only number on screen invites reading it as a success rate.
+    """
+    rec = _PATTERN_TRACK_RECORD.get(name)
+    if not rec or rec["n"] < TRACK_RECORD_MIN_N:
+        return None
+    z = rec["z"]
+    verdict = "helps" if z >= TRACK_RECORD_Z else "hurts" if z <= -TRACK_RECORD_Z else "neutral"
+    return {
+        "n": int(rec["n"]),
+        "hit_pct": rec["hit"] * 100,
+        "baseline_pct": rec["matched"] * 100,
+        "lift_pp": (rec["hit"] - rec["matched"]) * 100,
+        "z": z,
+        "verdict": verdict,
+    }
+
+
 def explain_pattern(name: str) -> Optional[Dict[str, str]]:
     """Reference entry for `name`, or None if the pattern isn't documented."""
     return PATTERN_GUIDE.get(name)

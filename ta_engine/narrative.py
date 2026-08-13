@@ -14,7 +14,7 @@ disclaimer travels with it.
 import html
 from typing import TYPE_CHECKING, List, Optional
 
-from .pattern_detector import explain_pattern
+from .pattern_detector import explain_pattern, pattern_track_record
 from .price_utils import format_price
 
 if TYPE_CHECKING:  # avoid a circular import at runtime
@@ -85,6 +85,47 @@ def _stoch_lines(result: "ChartResult") -> List[str]:
             "bukan aba-aba beli/jual.</i>"
         )
     return lines
+
+
+def _track_record_lines(name: Optional[str]) -> List[str]:
+    """
+    What this pattern actually did in our own out-of-sample test.
+
+    Shown because the shape score was measured and does NOT predict outcome —
+    leaving "kemiripan bentuk 90%" as the only number on screen invites reading
+    it as a success rate. A pattern that historically resolved AGAINST its own
+    direction has to say so; suppressing that while still printing a target
+    would be the most misleading thing this message could do.
+    """
+    if not name:
+        return []
+    rec = pattern_track_record(name)
+    if not rec:
+        return []
+
+    head = (
+        f"Uji 2 tahun, 30 saham IDX (n={rec['n']}): sesuai arah "
+        f"<b>{rec['hit_pct']:.0f}%</b> vs baseline {rec['baseline_pct']:.0f}% "
+        f"({rec['lift_pp']:+.0f} poin)"
+    )
+    if rec["verdict"] == "helps":
+        body = f"📈 {head} — <b>secara historis membantu.</b>"
+    elif rec["verdict"] == "hurts":
+        body = (
+            f"⚠️ {head} — <b>secara historis pola ini JUSTRU MELESET</b> lebih "
+            f"sering daripada kondisi pasar biasa. Perlakukan arah pola ini "
+            f"dengan sangat hati-hati."
+        )
+    else:
+        body = f"➖ {head} — tidak ada keunggulan yang terukur."
+
+    return [
+        "",
+        body,
+        "<i>Uji satu periode 2 tahun di IDX saja, tanpa biaya transaksi, dan "
+        "hanya melihat arah setelah 20 hari (bukan naik-turunnya di tengah "
+        "jalan). Bukti, bukan ramalan.</i>",
+    ]
 
 
 def _zone_lines(
@@ -171,8 +212,10 @@ def build_rationale(result: "ChartResult") -> str:
             _DIV,
             f"{icon} <b>Pola: {result.pattern_name}</b> — {bias}",
             f"<i>{tf} · kemiripan bentuk {result.quality_score * 100:.0f}% "
-            f"(serapi apa bentuknya, bukan peluang berhasil)</i>",
+            f"(serapi apa bentuknya — sudah kami uji, dan angka ini TIDAK "
+            f"memprediksi hasil)</i>",
         ]
+        lines += _track_record_lines(result.pattern_name)
 
         # Spell the pattern out. A name and a target with no explanation gives
         # the reader nothing to judge, and no way to see that the projection is
